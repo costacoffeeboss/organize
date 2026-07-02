@@ -1,14 +1,14 @@
-# Atomic
+# Organize
 
-**Small pieces. Big impact.** — habit tracking, journalling and to-do lists in one place.
+**Everything in its place.** — habit tracking, journalling and to-do lists in one calm place.
 
-Get the small pieces of your life in order and watch the impact compound.
+Tidy the little things and the big things follow.
 
 ## What's in here
 
 | Path | What it is |
 | --- | --- |
-| `App.js` | The app — a single-screen **React Native + Expo** habit tracker with on-device persistence (AsyncStorage). |
+| `App.js` | The app — a **React Native + Expo** to-do list, calendar and habit tracker with on-device persistence (AsyncStorage). |
 | `landing/index.html` | The marketing landing page (self-contained HTML/CSS). |
 | `assets/` | App icons and splash images. |
 

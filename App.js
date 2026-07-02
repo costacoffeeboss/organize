@@ -1,284 +1,229 @@
 // =====================================================================
-//  Atomic — Habit Tracker (starter)
-//  A single-screen React Native app you run with Expo.
+//  Organize — main app
+//  Three tabs: To-dos · Calendar · Habits.
 //
-//  Coming from Python? A few quick mental mappings:
-//    - This file is JavaScript. `const` = a variable you won't reassign.
-//    - A "component" is just a function that returns UI (like HTML).
-//    - useState = a variable React watches; when it changes, the screen redraws.
-//    - useEffect = "run this code when X happens" (e.g. on app start).
-//    - => is a lambda, same idea as Python's `lambda` / a small function.
-//  Don't worry about understanding every line yet — change things and see
-//  what happens. That's the fastest way to learn.
+//  This file is the "brain": it owns all the data (todos + habits),
+//  saves it to the phone, and hands the data + actions down to each
+//  screen as props. The screens only worry about how things look.
+//
+//  Coming from Python? useState = a variable React watches;
+//  useEffect = "run this when X changes"; props = function arguments
+//  for components.
 // =====================================================================
 
 import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet, Text, View, TextInput, TouchableOpacity,
-  FlatList, SafeAreaView, Alert, Platform, StatusBar as RNStatusBar,
-} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
-// Where we save habits on the phone. Bump the "v1" if you change the shape.
-const STORAGE_KEY = '@atomic_habits_v1';
+import { COLORS } from './theme';
+import { todayKey, yesterdayKey, nextOccurrence } from './utils/dates';
+import TodosScreen from './screens/TodosScreen';
+import CalendarScreen from './screens/CalendarScreen';
+import HabitsScreen from './screens/HabitsScreen';
 
-// --- Brand colours (matches the Atomic landing page) --- #a78bfa
-const COLORS = {
-  bg: '#0c0c11',
-  panel: '#16161f',
-  line: 'rgba(255,255,255,0.08)',
-  ink: '#f2f2f7',
-  muted: '#8d909e',
-  violet: '#8b5cf6',
-  violetLight: '#a78bfa',
+// Storage keys. (Habits keep the old "atomic" key so nothing is lost.)
+const HABITS_KEY = '@atomic_habits_v1';
+const TODOS_KEY = '@organize_todos_v1';
+
+const Tab = createBottomTabNavigator();
+
+// Make react-navigation's default surfaces match our cream theme.
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: COLORS.bg,
+    card: COLORS.panel,
+    text: COLORS.ink,
+    border: COLORS.line,
+    primary: COLORS.espresso,
+  },
 };
 
-// --- Small date helpers ---
-// We identify a day by a string like "2026-06-07" (local time).
-function dateKey(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-function yesterdayKey() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return dateKey(d);
-}
-
 export default function App() {
-  // The list of habits. Each one looks like:
-  //   { id, name, streak, lastDone }   (lastDone is a date string or null)
   const [habits, setHabits] = useState([]);
-  // The text currently typed into the "add a habit" box.
-  const [newHabit, setNewHabit] = useState('');
-  // Tracks whether we've finished loading saved data (avoids a flicker).
+  const [todos, setTodos] = useState([]);
   const [loaded, setLoaded] = useState(false);
 
-  // 1) On app start, load any saved habits from the phone.
+  // --- Load both lists once, when the app opens ---
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) setHabits(JSON.parse(raw));
+        const pairs = await AsyncStorage.multiGet([HABITS_KEY, TODOS_KEY]);
+        const rawHabits = pairs[0][1];
+        const rawTodos = pairs[1][1];
+        if (rawHabits) setHabits(JSON.parse(rawHabits));
+        if (rawTodos) {
+          const today = todayKey();
+          // Overnight tidy-up: one-offs ticked before today disappear.
+          const kept = JSON.parse(rawTodos).filter(
+            (t) => !(t.done && t.completedOn && t.completedOn < today)
+          );
+          setTodos(kept);
+        }
       } catch (e) {
-        console.log('Could not load habits:', e);
+        console.log('Could not load data:', e);
       } finally {
         setLoaded(true);
       }
     })();
-  }, []); // empty [] = "run once, when the app first opens"
+  }, []);
 
-  // 2) Whenever habits change, save them back to the phone.
+  // --- Save whenever anything changes (but not before loading) ---
   useEffect(() => {
-    if (!loaded) return; // don't overwrite saved data before we've loaded it
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(habits)).catch((e) =>
-      console.log('Could not save habits:', e)
-    );
+    if (!loaded) return;
+    AsyncStorage.setItem(HABITS_KEY, JSON.stringify(habits)).catch(() => {});
   }, [habits, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(TODOS_KEY, JSON.stringify(todos)).catch(() => {});
+  }, [todos, loaded]);
 
-  // --- Actions ---
+  // ================= Habit actions =================
 
-  function addHabit() {
-    const name = newHabit.trim();
-    if (!name) return;
+  function addHabit(name) {
     const habit = { id: Date.now().toString(), name, streak: 0, lastDone: null };
-    setHabits((prev) => [...prev, habit]); // [...prev, x] = a new list with x added
-    setNewHabit('');
+    setHabits((prev) => [...prev, habit]);
+    return habit.id;
   }
 
-  // Tick / un-tick a habit for today, updating its streak.
   function toggleHabit(id) {
     setHabits((prev) =>
       prev.map((h) => {
-        if (h.id !== id) return h; // leave other habits untouched
-        const doneToday = h.lastDone === dateKey();
+        if (h.id !== id) return h;
+        const doneToday = h.lastDone === todayKey();
         if (doneToday) {
-          // Un-tick: step the streak back by one. (Simplified — good enough to start.)
           return { ...h, lastDone: null, streak: Math.max(0, h.streak - 1) };
         }
-        // Tick: if we did it yesterday too, the streak continues; otherwise it restarts at 1.
         const continued = h.lastDone === yesterdayKey();
-        return { ...h, lastDone: dateKey(), streak: continued ? h.streak + 1 : 1 };
+        return { ...h, lastDone: todayKey(), streak: continued ? h.streak + 1 : 1 };
       })
     );
   }
 
   function deleteHabit(id) {
-    Alert.alert('Delete habit?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => setHabits((prev) => prev.filter((h) => h.id !== id)),
-      },
-    ]);
+    setHabits((prev) => prev.filter((h) => h.id !== id));
+    // If a to-do was linked to this habit, remove it too.
+    setTodos((prev) => prev.filter((t) => t.habitId !== id));
   }
 
-  // --- Derived values (recalculated every redraw) ---
-  const doneCount = habits.filter((h) => h.lastDone === dateKey()).length;
-  const total = habits.length;
-  const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
-  const niceDate = new Date().toLocaleDateString('en-GB', {
-    weekday: 'long', day: 'numeric', month: 'long',
-  });
+  // ================= To-do actions =================
 
-  // --- One row in the list ---
-  function HabitRow({ habit }) {
-    const done = habit.lastDone === dateKey();
-    return (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => toggleHabit(habit.id)}
-        onLongPress={() => deleteHabit(habit.id)} // hold to delete
-      >
-        <View style={[styles.check, done && styles.checkOn]}>
-          {done && <Text style={styles.checkMark}>✓</Text>}
-        </View>
-        <Text style={[styles.habitName, done && styles.habitNameDone]}>
-          {habit.name}
-        </Text>
-        {habit.streak > 0 && (
-          <Text style={styles.streak}>🔥 {habit.streak}</Text>
-        )}
-      </TouchableOpacity>
-    );
+  // options = { title, deadline, recur, habit }
+  function addTodo({ title, deadline, recur, habit }) {
+    if (habit) {
+      // "Habit" to-dos live in BOTH tabs: create the habit, then a
+      // linked to-do. The habit is the source of truth for ticks.
+      const habitId = addHabit(title);
+      setTodos((prev) => [...prev, {
+        id: habitId + '-todo', title, habitId,
+        recur: 'daily', nextDue: null, deadline: null,
+        done: false, completedOn: null,
+      }]);
+      return;
+    }
+    setTodos((prev) => [...prev, {
+      id: Date.now().toString(), title, habitId: null,
+      recur: recur || null,
+      nextDue: recur ? todayKey() : null,
+      deadline: deadline || null,
+      done: false, completedOn: null,
+    }]);
   }
+
+  function toggleTodo(id) {
+    const t = todos.find((x) => x.id === id);
+    if (!t) return;
+
+    // Habit-linked: the habit carries the state; one tick updates both tabs.
+    if (t.habitId) { toggleHabit(t.habitId); return; }
+
+    const today = todayKey();
+    if (t.recur) {
+      // Recurring: stays ticked for the rest of today, then hides
+      // until it's next due. Unticking today brings it straight back.
+      setTodos((prev) => prev.map((x) => {
+        if (x.id !== id) return x;
+        return x.completedOn === today
+          ? { ...x, completedOn: null, nextDue: today }
+          : { ...x, completedOn: today, nextDue: nextOccurrence(today, x.recur) };
+      }));
+      return;
+    }
+
+    // One-off: ticked today, tidied away overnight (see the load effect).
+    setTodos((prev) => prev.map((x) => {
+      if (x.id !== id) return x;
+      return x.done
+        ? { ...x, done: false, completedOn: null }
+        : { ...x, done: true, completedOn: today };
+    }));
+  }
+
+  function deleteTodo(id) {
+    const t = todos.find((x) => x.id === id);
+    setTodos((prev) => prev.filter((x) => x.id !== id));
+    // Deleting a habit-linked to-do removes the habit as well
+    // (the To-dos screen warns before calling this).
+    if (t && t.habitId) setHabits((prev) => prev.filter((h) => h.id !== t.habitId));
+  }
+
+  // ================= Navigation =================
+
+  const ICONS = {
+    'To-dos': 'checkbox-outline',
+    'Calendar': 'calendar-outline',
+    'Habits': 'flame-outline',
+  };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar style="light" />
-
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.logo}>atomic</Text>
-        <Text style={styles.date}>{niceDate}</Text>
-      </View>
-
-      {/* Progress summary */}
-      <View style={styles.summary}>
-        <Text style={styles.summaryBig}>
-          {doneCount}<Text style={styles.summaryDim}> / {total} done today</Text>
-        </Text>
-        <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${percent}%` }]} />
-        </View>
-      </View>
-
-      {/* Add a habit */}
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          placeholder="Add a habit…"
-          placeholderTextColor={COLORS.muted}
-          value={newHabit}
-          onChangeText={setNewHabit}
-          onSubmitEditing={addHabit} // pressing "return" adds it
-          returnKeyType="done"
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={addHabit}>
-          <Text style={styles.addBtnText}>＋</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* The list of habits */}
-      <FlatList
-        data={habits}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <HabitRow habit={item} />}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            No habits yet. Add your first one above —{'\n'}small pieces, big impact.
-          </Text>
-        }
-      />
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <StatusBar style="dark" />
+      <NavigationContainer theme={navTheme}>
+        <Tab.Navigator
+          screenOptions={({ route }) => ({
+            headerShown: false,
+            tabBarActiveTintColor: COLORS.espresso,
+            tabBarInactiveTintColor: COLORS.muted2,
+            tabBarStyle: {
+              backgroundColor: COLORS.panel,
+              borderTopColor: COLORS.line,
+            },
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name={ICONS[route.name]} size={size} color={color} />
+            ),
+          })}
+        >
+          <Tab.Screen name="To-dos">
+            {() => (
+              <TodosScreen
+                todos={todos}
+                habits={habits}
+                addTodo={addTodo}
+                toggleTodo={toggleTodo}
+                deleteTodo={deleteTodo}
+              />
+            )}
+          </Tab.Screen>
+          <Tab.Screen name="Calendar">
+            {() => <CalendarScreen todos={todos} toggleTodo={toggleTodo} />}
+          </Tab.Screen>
+          <Tab.Screen name="Habits">
+            {() => (
+              <HabitsScreen
+                habits={habits}
+                addHabit={addHabit}
+                toggleHabit={toggleHabit}
+                deleteHabit={deleteHabit}
+              />
+            )}
+          </Tab.Screen>
+        </Tab.Navigator>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
-
-// --- Styles (like CSS, but written as a JS object) ---
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-    paddingHorizontal: 20,
-    // Push content below the phone's status bar on Android:
-    paddingTop: Platform.OS === 'android' ? RNStatusBar.currentHeight : 0,
-  },
-  header: { marginTop: 12, marginBottom: 20 },
-  logo: { color: COLORS.ink, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  date: { color: COLORS.muted, fontSize: 14, marginTop: 2 },
-
-  summary: {
-    backgroundColor: COLORS.panel,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    padding: 18,
-    marginBottom: 18,
-  },
-  summaryBig: { color: COLORS.ink, fontSize: 22, fontWeight: '700' },
-  summaryDim: { color: COLORS.muted, fontSize: 16, fontWeight: '500' },
-  barTrack: {
-    height: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    marginTop: 14,
-    overflow: 'hidden',
-  },
-  barFill: { height: 8, borderRadius: 8, backgroundColor: COLORS.violet },
-
-  addRow: { flexDirection: 'row', marginBottom: 18 },
-  input: {
-    flex: 1,
-    backgroundColor: COLORS.panel,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    color: COLORS.ink,
-    fontSize: 16,
-  },
-  addBtn: {
-    width: 48,
-    marginLeft: 10,
-    borderRadius: 14,
-    backgroundColor: COLORS.violet,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addBtnText: { color: '#fff', fontSize: 26, fontWeight: '600', marginTop: -2 },
-
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.panel,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  check: {
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: COLORS.muted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  checkOn: { backgroundColor: COLORS.violet, borderColor: COLORS.violet },
-  checkMark: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  habitName: { color: COLORS.ink, fontSize: 16, flex: 1 },
-  habitNameDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
-  streak: { color: COLORS.violetLight, fontSize: 14, fontWeight: '600' },
-
-  empty: { color: COLORS.muted, fontSize: 15, textAlign: 'center', marginTop: 50, lineHeight: 22 },
-});
