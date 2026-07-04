@@ -2,18 +2,18 @@
 //  Journal tab
 //  One entry per day, with an optional one-tap mood. The calendar
 //  shows a dot on every day you wrote; tap a day to read or edit it.
-//  The ＋ at the bottom opens today's entry.
+//  Writing opens a FULL page — a blank page invites more than a box.
 // =====================================================================
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Modal,
+  KeyboardAvoidingView, Platform, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SERIF } from '../theme';
 import { todayKey, niceDate, currentStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
-import ModalShell from '../components/ModalShell';
 import CalendarPager from '../components/CalendarPager';
 import FAB from '../components/FAB';
 
@@ -55,8 +55,7 @@ export default function JournalScreen({ journal, saveEntry, deleteEntry }) {
 
   function onSave() {
     const text = draft.trim();
-    if (!text) { setEditingKey(null); return; }
-    saveEntry(editingKey, { text, mood });
+    if (text) saveEntry(editingKey, { text, mood });
     setEditingKey(null);
   }
 
@@ -112,56 +111,75 @@ export default function JournalScreen({ journal, saveEntry, deleteEntry }) {
 
       <FAB onPress={() => openDay(today)} />
 
-      {/* ================= Write / read pop-up ================= */}
-      <ModalShell
+      {/* ============ Full-page write / read ============ */}
+      <Modal
         visible={!!editingKey}
-        onClose={() => setEditingKey(null)}
-        title={editingKey === today ? 'Today' : editingKey ? niceDate(editingKey) : ''}
+        animationType="slide"
+        onRequestClose={() => setEditingKey(null)}
       >
-        <View>
-          {/* Mood chips */}
-          <View style={styles.moodRow}>
-            {MOODS.map((m) => (
+        <SafeAreaView style={styles.pageSafe} edges={['top', 'bottom']}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            {/* Page header: close · date · save */}
+            <View style={styles.pageHead}>
               <TouchableOpacity
-                key={m.id}
-                style={[styles.moodChip, mood === m.id && styles.moodChipOn]}
-                onPress={() => setMood(mood === m.id ? null : m.id)}
+                onPress={() => setEditingKey(null)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Text style={styles.moodEmoji}>{m.emoji}</Text>
-                <Text style={[styles.moodLabel, mood === m.id && styles.moodLabelOn]}>
-                  {m.label}
-                </Text>
+                <Text style={styles.pageClose}>✕</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-
-          <TextInput
-            style={styles.entryInput}
-            placeholder={prompt}
-            placeholderTextColor={COLORS.muted2}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            textAlignVertical="top"
-            autoFocus
-          />
-
-          <View style={styles.btnRow}>
-            {journal[editingKey] ? (
-              <TouchableOpacity onPress={onDelete}>
-                <Text style={styles.deleteBtn}>Delete</Text>
+              <Text style={styles.pageDate}>
+                {editingKey === today ? 'Today' : editingKey ? niceDate(editingKey) : ''}
+              </Text>
+              <TouchableOpacity
+                onPress={onSave}
+                disabled={!draft.trim()}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Text style={[styles.pageSave, !draft.trim() && { opacity: 0.35 }]}>Save</Text>
               </TouchableOpacity>
-            ) : <View />}
-            <TouchableOpacity
-              style={[styles.primaryBtn, !draft.trim() && { opacity: 0.4 }]}
-              onPress={onSave}
-              disabled={!draft.trim()}
-            >
-              <Text style={styles.primaryBtnText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ModalShell>
+            </View>
+
+            {/* Mood chips */}
+            <View style={styles.moodRow}>
+              {MOODS.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[styles.moodChip, mood === m.id && styles.moodChipOn]}
+                  onPress={() => setMood(mood === m.id ? null : m.id)}
+                >
+                  <Text style={styles.moodEmoji}>{m.emoji}</Text>
+                  <Text style={[styles.moodLabel, mood === m.id && styles.moodLabelOn]}>
+                    {m.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* The page itself — all remaining space is for writing */}
+            <TextInput
+              style={styles.page}
+              placeholder={prompt}
+              placeholderTextColor={COLORS.muted2}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              textAlignVertical="top"
+              autoFocus
+              scrollEnabled
+            />
+
+            {/* Delete lives quietly at the foot of existing entries */}
+            {journal[editingKey] && (
+              <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
+                <Text style={styles.deleteBtn}>Delete entry</Text>
+              </TouchableOpacity>
+            )}
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -190,8 +208,21 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 14,
   },
 
-  // --- pop-up ---
-  moodRow: { flexDirection: 'row', gap: 7, marginBottom: 12, flexWrap: 'wrap' },
+  // --- full-page composer ---
+  pageSafe: { flex: 1, backgroundColor: COLORS.bg },
+  pageHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: COLORS.line,
+  },
+  pageClose: { color: COLORS.muted, fontSize: 17, fontWeight: '600' },
+  pageDate: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF },
+  pageSave: { color: COLORS.espresso, fontSize: 16, fontWeight: '700' },
+
+  moodRow: {
+    flexDirection: 'row', gap: 7, flexWrap: 'wrap',
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6,
+  },
   moodChip: {
     alignItems: 'center', borderWidth: 1, borderColor: COLORS.lineStrong,
     borderRadius: 12, paddingVertical: 7, paddingHorizontal: 10,
@@ -202,17 +233,11 @@ const styles = StyleSheet.create({
   moodLabel: { color: COLORS.muted, fontSize: 12.5, fontWeight: '600' },
   moodLabelOn: { color: COLORS.bg },
 
-  entryInput: {
-    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
-    borderRadius: 14, padding: 14, minHeight: 140, maxHeight: 260,
-    color: COLORS.ink, fontSize: 15.5, lineHeight: 22, marginBottom: 14,
+  page: {
+    flex: 1, color: COLORS.ink, fontSize: 16.5, lineHeight: 25,
+    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16,
   },
 
-  btnRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  deleteBtn: { color: COLORS.danger, fontSize: 15, fontWeight: '600' },
-  primaryBtn: {
-    backgroundColor: COLORS.espresso, borderRadius: 14,
-    paddingVertical: 12, paddingHorizontal: 28, alignItems: 'center',
-  },
-  primaryBtnText: { color: COLORS.bg, fontSize: 15.5, fontWeight: '700' },
+  deleteRow: { alignItems: 'center', paddingVertical: 12 },
+  deleteBtn: { color: COLORS.danger, fontSize: 14.5, fontWeight: '600' },
 });

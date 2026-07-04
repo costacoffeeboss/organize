@@ -1,19 +1,20 @@
 // =====================================================================
 //  To-dos tab
-//  A clean list with a floating ＋. The pop-up takes a title plus two
-//  optional details:
-//    Repeat   — daily · weekly on chosen weekdays · every 2/4 weeks
-//               from a start date · monthly on a day of the month
-//    Deadline — a single date (repeating tasks don't have one)
+//  Three groups, calmest first:
+//    Today    — things with a deadline that lands today (overdue ones
+//               sit above in red so they can't hide)
+//    To-do    — the open list: anytime tasks + repeatable tasks that
+//               are currently due. Ticking a repeatable puts it away
+//               until it comes around again. (Expandable)
+//    Upcoming — the next three dated things, collapsed by default.
 //
-//  Sections: Overdue (missed deadlines) → Today → Upcoming.
-//  Completed one-offs stay ticked for the rest of the day — small win,
-//  small reward — then tidy themselves away overnight.
+//  The floating ＋ opens the add pop-up: title, repeat (daily · weekly
+//  on chosen weekdays · every 2/4 weeks · monthly on a day) or deadline.
 // =====================================================================
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, SectionList, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../theme';
@@ -38,6 +39,11 @@ const REPEAT_MODES = [
 
 export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
   const today = todayKey();
+
+  // Which groups are open. To-do starts open (it's the working list),
+  // Upcoming starts closed (it's a glance, not a burden).
+  const [todoOpen, setTodoOpen] = useState(true);
+  const [upcomingOpen, setUpcomingOpen] = useState(false);
 
   // --- Pop-up state ---
   const [showAdd, setShowAdd] = useState(false);
@@ -88,35 +94,35 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
     setShowAdd(false);
   }
 
-  // --- Sort every to-do into a section ---
-  const overdue = [], todayList = [], upcoming = [];
+  // --- Sort every to-do into its group ---
+  const overdue = [], todayList = [], todoList = [], upcomingAll = [];
   todos.forEach((t) => {
     if (t.repeat) {
-      if (t.completedOn === today || t.nextDue <= today) todayList.push(t);
-      else upcoming.push(t);
+      // Repeatables live in To-do while due; once ticked they hide
+      // until they come around again (their next date shows in Upcoming).
+      if (t.completedOn !== today && t.nextDue <= today) todoList.push(t);
+      else upcomingAll.push(t);
       return;
     }
-    if (t.done) { todayList.push(t); return; }             // ticked today
-    if (t.deadline && t.deadline < today) overdue.push(t);
-    else if (t.deadline && t.deadline > today) upcoming.push(t);
-    else todayList.push(t);                                // due today / no deadline
+    if (t.deadline) {
+      if (t.done || t.deadline === today) todayList.push(t);      // due (or finished) today
+      else if (t.deadline < today) overdue.push(t);
+      else upcomingAll.push(t);
+      return;
+    }
+    todoList.push(t); // anytime tasks — ticked ones tidy away overnight
   });
   overdue.sort((a, b) => (a.deadline < b.deadline ? -1 : 1));
-  upcoming.sort((a, b) =>
+  upcomingAll.sort((a, b) =>
     (a.deadline || a.nextDue) < (b.deadline || b.nextDue) ? -1 : 1
   );
-
-  const sections = [
-    { title: 'Overdue', data: overdue },
-    { title: 'Today', data: todayList },
-    { title: 'Upcoming', data: upcoming },
-  ].filter((s) => s.data.length > 0);
+  const upcoming = upcomingAll.slice(0, 3); // just the next three
 
   // --- The small right-hand label on each row ---
-  function metaFor(t, section) {
+  function metaFor(t, group) {
     if (t.repeat) {
       const label = repeatLabel(t.repeat);
-      return section === 'Upcoming' ? `${shortDate(t.nextDue)} · ${label}` : label;
+      return group === 'upcoming' ? `${shortDate(t.nextDue)} · ${label}` : label;
     }
     if (t.deadline) return shortDate(t.deadline);
     return null;
@@ -131,39 +137,98 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
 
   const isDone = (t) => (t.repeat ? t.completedOn === today : t.done);
 
+  function renderRows(list, group) {
+    return list.map((t) => (
+      <TodoRow
+        key={t.id}
+        title={t.title}
+        done={isDone(t)}
+        meta={metaFor(t, group)}
+        metaColor={group === 'overdue' ? COLORS.danger : undefined}
+        onToggle={() => toggleTodo(t.id)}
+        onLongPress={() => onLongPress(t)}
+      />
+    ));
+  }
+
+  // An expandable group header: title · count · chevron.
+  function GroupHead({ label, count, open, onPress }) {
+    return (
+      <TouchableOpacity style={styles.groupHead} onPress={onPress} activeOpacity={0.7}>
+        <Text style={styles.groupTitle}>{label}</Text>
+        <View style={styles.groupRight}>
+          {count > 0 && <Text style={styles.groupCount}>{count}</Text>}
+          <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  const empty = todos.length === 0;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title="Organize" subtitle={niceDate()} />
 
-      <SectionList
-        sections={sections}
-        keyExtractor={(item) => item.id}
-        stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <Text style={[
-            styles.sectionTitle,
-            section.title === 'Overdue' && { color: COLORS.danger },
-          ]}>
-            {section.title}
-          </Text>
-        )}
-        renderItem={({ item, section }) => (
-          <TodoRow
-            title={item.title}
-            done={isDone(item)}
-            meta={metaFor(item, section.title)}
-            metaColor={section.title === 'Overdue' ? COLORS.danger : undefined}
-            onToggle={() => toggleTodo(item.id)}
-            onLongPress={() => onLongPress(item)}
-          />
-        )}
-        contentContainerStyle={{ paddingBottom: 110 }}
-        ListEmptyComponent={
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+        {empty && (
           <Text style={styles.empty}>
             Nothing here yet. Tap ＋ to add your first to-do —{'\n'}everything in its place.
           </Text>
-        }
-      />
+        )}
+
+        {/* --- Overdue (can't hide) --- */}
+        {overdue.length > 0 && (
+          <View>
+            <Text style={[styles.plainTitle, { color: COLORS.danger }]}>Overdue</Text>
+            {renderRows(overdue, 'overdue')}
+          </View>
+        )}
+
+        {/* --- Today --- */}
+        {!empty && (
+          <View>
+            <Text style={styles.plainTitle}>Today</Text>
+            {todayList.length > 0
+              ? renderRows(todayList, 'today')
+              : <Text style={styles.quiet}>No deadlines today.</Text>}
+          </View>
+        )}
+
+        {/* --- To-do (expandable) --- */}
+        {!empty && (
+          <View>
+            <GroupHead
+              label="To-do"
+              count={todoList.length}
+              open={todoOpen}
+              onPress={() => setTodoOpen(!todoOpen)}
+            />
+            {todoOpen && (
+              todoList.length > 0
+                ? renderRows(todoList, 'todo')
+                : <Text style={styles.quiet}>All clear.</Text>
+            )}
+          </View>
+        )}
+
+        {/* --- Upcoming (expandable, next three) --- */}
+        {!empty && (
+          <View>
+            <GroupHead
+              label="Upcoming"
+              count={upcomingAll.length}
+              open={upcomingOpen}
+              onPress={() => setUpcomingOpen(!upcomingOpen)}
+            />
+            {upcomingOpen && (
+              upcoming.length > 0
+                ? renderRows(upcoming, 'upcoming')
+                : <Text style={styles.quiet}>Nothing on the horizon.</Text>
+            )}
+          </View>
+        )}
+      </ScrollView>
 
       <FAB onPress={openAdd} />
 
@@ -306,11 +371,28 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
-  sectionTitle: {
+  plainTitle: {
     color: COLORS.muted2, fontSize: 12, fontWeight: '700',
     letterSpacing: 1.5, textTransform: 'uppercase',
-    marginTop: 8, marginBottom: 8,
+    marginTop: 10, marginBottom: 8,
   },
+  groupHead: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 10, marginBottom: 8, paddingVertical: 2,
+  },
+  groupTitle: {
+    color: COLORS.muted2, fontSize: 12, fontWeight: '700',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+  },
+  groupRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  groupCount: {
+    color: COLORS.espressoLight, fontSize: 11.5, fontWeight: '700',
+    backgroundColor: 'rgba(75,54,38,0.1)', borderRadius: 999,
+    paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden',
+  },
+  chevron: { color: COLORS.muted2, fontSize: 13 },
+
+  quiet: { color: COLORS.muted, fontSize: 13.5, marginBottom: 10 },
   empty: { color: COLORS.muted, fontSize: 15, textAlign: 'center', marginTop: 50, lineHeight: 22 },
 
   // --- pop-up form ---
