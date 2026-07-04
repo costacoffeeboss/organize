@@ -1,22 +1,26 @@
 // =====================================================================
 //  Habits tab
-//  Daily routines with streaks. Habits arrive here two ways:
-//    1. Added directly below.
-//    2. Created from the To-dos tab with the "Habit" option — those
-//       live in BOTH tabs, and one tick updates both.
+//  Two halves, like the landing page promised:
+//    Today   — the checkable list of daily habits
+//    Tracker — tap any habit to see its analytics: a month heatmap of
+//              completed days, current & best streak, and the last
+//              30 days as a percentage.
 // =====================================================================
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS } from '../theme';
-import { todayKey } from '../utils/dates';
+import { COLORS, SERIF } from '../theme';
+import { todayKey, addDays, currentStreak, bestStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
+import CalendarPager from '../components/CalendarPager';
+import ModalShell from '../components/ModalShell';
 
 export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
   const [newHabit, setNewHabit] = useState('');
+  const [openId, setOpenId] = useState(null); // which habit's analytics are open
   const today = todayKey();
 
   const doneCount = habits.filter((h) => h.lastDone === today).length;
@@ -31,12 +35,13 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
   }
 
   function onLongPress(habit) {
-    Alert.alert('Delete habit?', 'Streak history will be lost.', [
+    Alert.alert('Delete habit?', 'Its history will be lost.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => deleteHabit(habit.id) },
     ]);
   }
 
+  // --- One row in the Today checklist ---
   function HabitRow({ habit }) {
     const done = habit.lastDone === today;
     return (
@@ -56,47 +61,113 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
     );
   }
 
+  // --- One row in the Tracker: name + the last 7 days as mini cells ---
+  function TrackerRow({ habit }) {
+    const days = new Set(habit.history || []);
+    const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+    return (
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() => setOpenId(habit.id)}
+        onLongPress={() => onLongPress(habit)}
+      >
+        <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
+        <View style={styles.weekStrip}>
+          {week.map((k) => (
+            <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
+          ))}
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  const open = habits.find((h) => h.id === openId);
+  const openDays = open ? new Set(open.history || []) : new Set();
+  const last30 = open
+    ? Array.from({ length: 30 }, (_, i) => addDays(today, -i)).filter((k) => openDays.has(k)).length
+    : 0;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title="Habits" subtitle="Small things, done daily" />
 
-      {/* Progress summary */}
-      <View style={styles.summary}>
-        <Text style={styles.summaryBig}>
-          {doneCount}<Text style={styles.summaryDim}> / {total} done today</Text>
-        </Text>
-        <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${percent}%` }]} />
-        </View>
-      </View>
-
-      {/* Add a habit */}
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          placeholder="Add a habit…"
-          placeholderTextColor={COLORS.muted2}
-          value={newHabit}
-          onChangeText={setNewHabit}
-          onSubmitEditing={onAdd}
-          returnKeyType="done"
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={onAdd}>
-          <Text style={styles.addBtnText}>＋</Text>
-        </TouchableOpacity>
-      </View>
-
-      <FlatList
-        data={habits}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <HabitRow habit={item} />}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            No habits yet. Add one above, or tag a to-do{'\n'}as a habit from the To-dos tab.
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* Progress summary */}
+        <View style={styles.summary}>
+          <Text style={styles.summaryBig}>
+            {doneCount}<Text style={styles.summaryDim}> / {total} done today</Text>
           </Text>
-        }
-      />
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, { width: `${percent}%` }]} />
+          </View>
+        </View>
+
+        {/* Add a habit */}
+        <View style={styles.addRow}>
+          <TextInput
+            style={styles.input}
+            placeholder="Add a habit…"
+            placeholderTextColor={COLORS.muted2}
+            value={newHabit}
+            onChangeText={setNewHabit}
+            onSubmitEditing={onAdd}
+            returnKeyType="done"
+          />
+          <TouchableOpacity style={styles.addBtn} onPress={onAdd}>
+            <Text style={styles.addBtnText}>＋</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Today checklist */}
+        <Text style={styles.sectionTitle}>Today</Text>
+        {habits.length === 0 && (
+          <Text style={styles.empty}>No habits yet — add one above.</Text>
+        )}
+        {habits.map((h) => <HabitRow key={h.id} habit={h} />)}
+
+        {/* Tracker */}
+        {habits.length > 0 && (
+          <View>
+            <Text style={styles.sectionTitle}>Habit tracker</Text>
+            <Text style={styles.trackerHint}>Last 7 days — tap a habit for the full picture.</Text>
+            {habits.map((h) => <TrackerRow key={h.id} habit={h} />)}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* ================= Analytics pop-up ================= */}
+      <ModalShell
+        visible={!!open}
+        onClose={() => setOpenId(null)}
+        title={open ? open.name : ''}
+      >
+        {open && (
+          <View>
+            {/* Stat tiles */}
+            <View style={styles.statRow}>
+              <View style={styles.stat}>
+                <Text style={styles.statNum}>{currentStreak(openDays)}</Text>
+                <Text style={styles.statLabel}>streak</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statNum}>{bestStreak(openDays)}</Text>
+                <Text style={styles.statLabel}>best</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statNum}>{Math.round((last30 / 30) * 100)}%</Text>
+                <Text style={styles.statLabel}>last 30 days</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statNum}>{openDays.size}</Text>
+                <Text style={styles.statLabel}>total</Text>
+              </View>
+            </View>
+
+            {/* Month heatmap — filled circles are completed days */}
+            <CalendarPager filled={openDays} maxKey={today} />
+          </View>
+        )}
+      </ModalShell>
     </SafeAreaView>
   );
 }
@@ -116,7 +187,7 @@ const styles = StyleSheet.create({
   },
   barFill: { height: 8, borderRadius: 8, backgroundColor: COLORS.espresso },
 
-  addRow: { flexDirection: 'row', marginBottom: 14 },
+  addRow: { flexDirection: 'row', marginBottom: 6 },
   input: {
     flex: 1, backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
@@ -127,6 +198,13 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   addBtnText: { color: COLORS.bg, fontSize: 26, fontWeight: '600', marginTop: -2 },
+
+  sectionTitle: {
+    color: COLORS.muted2, fontSize: 12, fontWeight: '700',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+    marginTop: 14, marginBottom: 8,
+  },
+  trackerHint: { color: COLORS.muted, fontSize: 13, marginBottom: 10, marginTop: -4 },
 
   row: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel,
@@ -144,5 +222,22 @@ const styles = StyleSheet.create({
   habitNameDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
   streak: { color: COLORS.espressoLight, fontSize: 14, fontWeight: '600' },
 
-  empty: { color: COLORS.muted, fontSize: 15, textAlign: 'center', marginTop: 50, lineHeight: 22 },
+  weekStrip: { flexDirection: 'row', gap: 5, marginLeft: 10 },
+  weekCell: {
+    width: 16, height: 22, borderRadius: 5,
+    backgroundColor: 'rgba(59,44,30,0.07)',
+    borderWidth: 1, borderColor: COLORS.line,
+  },
+  weekCellOn: { backgroundColor: COLORS.espressoLight, borderColor: COLORS.espressoLight },
+
+  statRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  stat: {
+    flex: 1, backgroundColor: COLORS.panelDeep, borderRadius: 12,
+    borderWidth: 1, borderColor: COLORS.line,
+    paddingVertical: 12, alignItems: 'center',
+  },
+  statNum: { color: COLORS.ink, fontSize: 20, fontWeight: '700', fontFamily: SERIF },
+  statLabel: { color: COLORS.muted2, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 3 },
+
+  empty: { color: COLORS.muted, fontSize: 14.5, marginBottom: 8 },
 });

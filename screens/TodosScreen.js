@@ -1,93 +1,97 @@
 // =====================================================================
 //  To-dos tab
-//  The main list. Adding a to-do offers three options:
-//    Repeat   — daily / weekly / every 2 weeks / monthly
-//    Deadline — pick a date on a mini calendar (shows up in Calendar tab)
-//    Habit    — ALSO track it as a daily habit (lives in both tabs;
-//               one tick updates both places)
+//  A clean list with a floating ＋. The pop-up takes a title plus two
+//  optional details:
+//    Repeat   — daily · weekly on chosen weekdays · every 2/4 weeks
+//               from a start date · monthly on a day of the month
+//    Deadline — a single date (repeating tasks don't have one)
 //
 //  Sections: Overdue (missed deadlines) → Today → Upcoming.
-//  Completed items stay ticked for the rest of the day — small win,
+//  Completed one-offs stay ticked for the rest of the day — small win,
 //  small reward — then tidy themselves away overnight.
 // =====================================================================
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, SectionList,
-  Modal, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, SectionList, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SERIF } from '../theme';
-import { todayKey, shortDate, niceDate, RECUR_LABELS } from '../utils/dates';
+import { COLORS } from '../theme';
+import {
+  todayKey, shortDate, niceDate, repeatLabel, WEEKDAY_LETTERS,
+} from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import TodoRow from '../components/TodoRow';
-import MonthGrid from '../components/MonthGrid';
+import ModalShell from '../components/ModalShell';
+import CalendarPager from '../components/CalendarPager';
+import FAB from '../components/FAB';
 
-const RECUR_OPTIONS = [
-  { value: null, label: 'Off' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'fortnightly', label: '2 weeks' },
-  { value: 'monthly', label: 'Monthly' },
+// The repeat "modes" shown as chips in the pop-up.
+const REPEAT_MODES = [
+  { id: 'off', label: 'Off' },
+  { id: 'daily', label: 'Daily' },
+  { id: 'weekly', label: 'Weekly' },
+  { id: 'biweekly', label: '2 weeks' },
+  { id: 'fourweekly', label: '4 weeks' },
+  { id: 'monthly', label: 'Monthly' },
 ];
 
-export default function TodosScreen({ todos, habits, addTodo, toggleTodo, deleteTodo }) {
+export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
   const today = todayKey();
 
-  // --- The "add a to-do" form state ---
+  // --- Pop-up state ---
+  const [showAdd, setShowAdd] = useState(false);
+  const [page, setPage] = useState('form'); // 'form' | 'deadline' | 'start'
   const [title, setTitle] = useState('');
-  const [recur, setRecur] = useState(null);       // null | 'daily' | ...
-  const [deadline, setDeadline] = useState(null); // null | "2026-07-04"
-  const [habitOn, setHabitOn] = useState(false);
-  const [showRecurRow, setShowRecurRow] = useState(false);
-  const [showPicker, setShowPicker] = useState(false);
-  // Which month the deadline picker is looking at:
-  const now = new Date();
-  const [pickYear, setPickYear] = useState(now.getFullYear());
-  const [pickMonth, setPickMonth] = useState(now.getMonth());
+  const [mode, setMode] = useState('off');
+  const [weekdays, setWeekdays] = useState([]);   // [0..6] Mon-first
+  const [startKey, setStartKey] = useState(today); // interval repeats
+  const [monthDay, setMonthDay] = useState(new Date().getDate());
+  const [deadline, setDeadline] = useState(null);
 
-  // The three options are mutually exclusive where they'd conflict:
-  // a habit is implicitly daily, and a repeating task has no single deadline.
-  function chooseRecur(value) {
-    setRecur(value);
-    if (value) { setDeadline(null); setHabitOn(false); }
-    setShowRecurRow(false);
+  function resetForm() {
+    setPage('form'); setTitle(''); setMode('off');
+    setWeekdays([]); setStartKey(todayKey());
+    setMonthDay(new Date().getDate()); setDeadline(null);
   }
-  function chooseDeadline(key) {
-    setDeadline(key);
-    setRecur(null); setHabitOn(false);
-    setShowPicker(false);
+  function openAdd() { resetForm(); setShowAdd(true); }
+
+  function chooseMode(id) {
+    setMode(id);
+    if (id !== 'off') setDeadline(null); // repeating tasks have no deadline
   }
-  function toggleHabitOption() {
-    setHabitOn((on) => {
-      const next = !on;
-      if (next) { setRecur(null); setDeadline(null); }
-      return next;
-    });
+
+  function toggleWeekday(i) {
+    setWeekdays((prev) =>
+      prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i].sort()
+    );
+  }
+
+  // Turn the pop-up's state into the repeat object the app stores.
+  function buildRepeat() {
+    if (mode === 'daily') return { type: 'weekly', days: [0, 1, 2, 3, 4, 5, 6] };
+    if (mode === 'weekly') return weekdays.length ? { type: 'weekly', days: weekdays } : null;
+    if (mode === 'biweekly') return { type: 'interval', every: 14, start: startKey };
+    if (mode === 'fourweekly') return { type: 'interval', every: 28, start: startKey };
+    if (mode === 'monthly') return { type: 'monthly', day: monthDay };
+    return null;
   }
 
   function onAdd() {
     const t = title.trim();
     if (!t) return;
-    addTodo({ title: t, deadline, recur, habit: habitOn });
-    setTitle(''); setRecur(null); setDeadline(null); setHabitOn(false);
-  }
-
-  // --- Is a given to-do ticked right now? ---
-  function isDone(t) {
-    if (t.habitId) {
-      const h = habits.find((h) => h.id === t.habitId);
-      return h ? h.lastDone === today : false;
+    if (mode === 'weekly' && weekdays.length === 0) {
+      Alert.alert('Pick a day', 'Choose at least one weekday for a weekly repeat.');
+      return;
     }
-    if (t.recur) return t.completedOn === today;
-    return t.done;
+    addTodo({ title: t, deadline: mode === 'off' ? deadline : null, repeat: buildRepeat() });
+    setShowAdd(false);
   }
 
   // --- Sort every to-do into a section ---
   const overdue = [], todayList = [], upcoming = [];
   todos.forEach((t) => {
-    if (t.habitId) { todayList.push(t); return; }          // habits are daily
-    if (t.recur) {
+    if (t.repeat) {
       if (t.completedOn === today || t.nextDue <= today) todayList.push(t);
       else upcoming.push(t);
       return;
@@ -110,12 +114,8 @@ export default function TodosScreen({ todos, habits, addTodo, toggleTodo, delete
 
   // --- The small right-hand label on each row ---
   function metaFor(t, section) {
-    if (t.habitId) {
-      const h = habits.find((h) => h.id === t.habitId);
-      return h && h.streak > 0 ? `🔥 ${h.streak}` : 'habit';
-    }
-    if (t.recur) {
-      const label = RECUR_LABELS[t.recur];
+    if (t.repeat) {
+      const label = repeatLabel(t.repeat);
       return section === 'Upcoming' ? `${shortDate(t.nextDue)} · ${label}` : label;
     }
     if (t.deadline) return shortDate(t.deadline);
@@ -123,85 +123,18 @@ export default function TodosScreen({ todos, habits, addTodo, toggleTodo, delete
   }
 
   function onLongPress(t) {
-    const isHabit = !!t.habitId;
-    Alert.alert(
-      isHabit ? 'Delete habit?' : 'Delete to-do?',
-      isHabit
-        ? 'This is tracked as a habit — deleting removes it from both tabs.'
-        : 'This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(t.id) },
-      ]
-    );
+    Alert.alert('Delete to-do?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(t.id) },
+    ]);
   }
+
+  const isDone = (t) => (t.repeat ? t.completedOn === today : t.done);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title="Organize" subtitle={niceDate()} />
 
-      {/* --- Add a to-do --- */}
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.input}
-          placeholder="Add a to-do…"
-          placeholderTextColor={COLORS.muted2}
-          value={title}
-          onChangeText={setTitle}
-          onSubmitEditing={onAdd}
-          returnKeyType="done"
-        />
-        <TouchableOpacity style={styles.addBtn} onPress={onAdd}>
-          <Text style={styles.addBtnText}>＋</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* --- Option chips --- */}
-      <View style={styles.chips}>
-        <TouchableOpacity
-          style={[styles.chip, recur && styles.chipOn]}
-          onPress={() => setShowRecurRow((v) => !v)}
-        >
-          <Text style={[styles.chipText, recur && styles.chipTextOn]}>
-            ↻ {recur ? RECUR_LABELS[recur] : 'Repeat'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.chip, deadline && styles.chipOn]}
-          onPress={() => setShowPicker(true)}
-        >
-          <Text style={[styles.chipText, deadline && styles.chipTextOn]}>
-            {deadline ? shortDate(deadline) : 'Deadline'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.chip, habitOn && styles.chipOn]}
-          onPress={toggleHabitOption}
-        >
-          <Text style={[styles.chipText, habitOn && styles.chipTextOn]}>
-            {habitOn ? '✓ Habit' : 'Habit'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* --- Repeat choices (expand under the chips) --- */}
-      {showRecurRow && (
-        <View style={styles.chips}>
-          {RECUR_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={String(opt.value)}
-              style={[styles.chipSmall, recur === opt.value && styles.chipOn]}
-              onPress={() => chooseRecur(opt.value)}
-            >
-              <Text style={[styles.chipText, recur === opt.value && styles.chipTextOn]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* --- The list --- */}
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
@@ -224,83 +157,154 @@ export default function TodosScreen({ todos, habits, addTodo, toggleTodo, delete
             onLongPress={() => onLongPress(item)}
           />
         )}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            Nothing here yet. Add your first to-do above —{'\n'}everything in its place.
+            Nothing here yet. Tap ＋ to add your first to-do —{'\n'}everything in its place.
           </Text>
         }
       />
 
-      {/* --- Deadline picker modal --- */}
-      <Modal visible={showPicker} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHead}>
-              <TouchableOpacity onPress={() => {
-                if (pickMonth === 0) { setPickMonth(11); setPickYear(pickYear - 1); }
-                else setPickMonth(pickMonth - 1);
-              }}>
-                <Text style={styles.navArrow}>‹</Text>
-              </TouchableOpacity>
-              <Text style={styles.modalMonth}>
-                {new Date(pickYear, pickMonth, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
-              </Text>
-              <TouchableOpacity onPress={() => {
-                if (pickMonth === 11) { setPickMonth(0); setPickYear(pickYear + 1); }
-                else setPickMonth(pickMonth + 1);
-              }}>
-                <Text style={styles.navArrow}>›</Text>
-              </TouchableOpacity>
-            </View>
-            <MonthGrid
-              year={pickYear}
-              month={pickMonth}
-              selected={deadline}
-              onSelect={chooseDeadline}
+      <FAB onPress={openAdd} />
+
+      {/* ================= Add pop-up ================= */}
+      <ModalShell
+        visible={showAdd}
+        onClose={() => setShowAdd(false)}
+        title={page === 'form' ? 'New to-do'
+          : page === 'deadline' ? 'Deadline' : 'Starts on'}
+      >
+        {page === 'form' && (
+          <View>
+            <TextInput
+              style={styles.input}
+              placeholder="What needs doing?"
+              placeholderTextColor={COLORS.muted2}
+              value={title}
+              onChangeText={setTitle}
+              autoFocus
+              returnKeyType="done"
             />
-            <View style={styles.modalBtns}>
-              <TouchableOpacity onPress={() => { setDeadline(null); setShowPicker(false); }}>
-                <Text style={styles.modalBtnGhost}>Clear</Text>
+
+            {/* Repeat */}
+            <Text style={styles.label}>Repeat</Text>
+            <View style={styles.chips}>
+              {REPEAT_MODES.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[styles.chip, mode === m.id && styles.chipOn]}
+                  onPress={() => chooseMode(m.id)}
+                >
+                  <Text style={[styles.chipText, mode === m.id && styles.chipTextOn]}>
+                    {m.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Weekly → weekday chips */}
+            {mode === 'weekly' && (
+              <View style={styles.chips}>
+                {WEEKDAY_LETTERS.map((w, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[styles.dayChip, weekdays.includes(i) && styles.chipOn]}
+                    onPress={() => toggleWeekday(i)}
+                  >
+                    <Text style={[styles.chipText, weekdays.includes(i) && styles.chipTextOn]}>
+                      {w}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Every 2/4 weeks → start date */}
+            {(mode === 'biweekly' || mode === 'fourweekly') && (
+              <TouchableOpacity style={styles.fieldRow} onPress={() => setPage('start')}>
+                <Text style={styles.fieldLabel}>Starts</Text>
+                <Text style={styles.fieldValue}>{shortDate(startKey)} ›</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowPicker(false)}>
-                <Text style={styles.modalBtn}>Done</Text>
+            )}
+
+            {/* Monthly → day-of-month grid */}
+            {mode === 'monthly' && (
+              <View style={styles.monthDays}>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.dayCell, monthDay === d && styles.chipOn]}
+                    onPress={() => setMonthDay(d)}
+                  >
+                    <Text style={[styles.chipText, monthDay === d && styles.chipTextOn]}>
+                      {d}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Deadline (one-off tasks only) */}
+            {mode === 'off' && (
+              <TouchableOpacity style={styles.fieldRow} onPress={() => setPage('deadline')}>
+                <Text style={styles.fieldLabel}>Deadline</Text>
+                <Text style={styles.fieldValue}>
+                  {deadline ? `${shortDate(deadline)} ›` : 'None ›'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, !title.trim() && { opacity: 0.4 }]}
+              onPress={onAdd}
+              disabled={!title.trim()}
+            >
+              <Text style={styles.primaryBtnText}>Add to-do</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* --- date pages swap in place of the form --- */}
+        {page === 'deadline' && (
+          <View>
+            <CalendarPager
+              initialKey={deadline || today}
+              selected={deadline}
+              onSelect={(k) => { setDeadline(k); setPage('form'); }}
+            />
+            <View style={styles.pickerBtns}>
+              <TouchableOpacity onPress={() => { setDeadline(null); setPage('form'); }}>
+                <Text style={styles.ghostBtn}>Clear</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setPage('form')}>
+                <Text style={styles.linkBtn}>Back</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
+        )}
+
+        {page === 'start' && (
+          <View>
+            <CalendarPager
+              initialKey={startKey}
+              selected={startKey}
+              onSelect={(k) => { setStartKey(k); setPage('form'); }}
+            />
+            <View style={styles.pickerBtns}>
+              <View />
+              <TouchableOpacity onPress={() => setPage('form')}>
+                <Text style={styles.linkBtn}>Back</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </ModalShell>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
-
-  addRow: { flexDirection: 'row', marginBottom: 10 },
-  input: {
-    flex: 1, backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
-    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
-    color: COLORS.ink, fontSize: 16,
-  },
-  addBtn: {
-    width: 48, marginLeft: 10, borderRadius: 14, backgroundColor: COLORS.espresso,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  addBtnText: { color: COLORS.bg, fontSize: 26, fontWeight: '600', marginTop: -2 },
-
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  chip: {
-    borderWidth: 1, borderColor: COLORS.lineStrong, borderRadius: 999,
-    paddingHorizontal: 14, paddingVertical: 7, backgroundColor: COLORS.panel,
-  },
-  chipSmall: {
-    borderWidth: 1, borderColor: COLORS.lineStrong, borderRadius: 999,
-    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: COLORS.panel,
-  },
-  chipOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
-  chipText: { color: COLORS.muted, fontSize: 13, fontWeight: '600' },
-  chipTextOn: { color: COLORS.bg },
 
   sectionTitle: {
     color: COLORS.muted2, fontSize: 12, fontWeight: '700',
@@ -309,24 +313,55 @@ const styles = StyleSheet.create({
   },
   empty: { color: COLORS.muted, fontSize: 15, textAlign: 'center', marginTop: 50, lineHeight: 22 },
 
-  modalBackdrop: {
-    flex: 1, backgroundColor: 'rgba(42,33,24,0.45)',
-    justifyContent: 'center', padding: 24,
+  // --- pop-up form ---
+  input: {
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
+    color: COLORS.ink, fontSize: 16, marginBottom: 16,
   },
-  modalCard: {
-    backgroundColor: COLORS.panel, borderRadius: 18, padding: 18,
-    borderWidth: 1, borderColor: COLORS.line,
+  label: {
+    color: COLORS.muted2, fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8,
   },
-  modalHead: {
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  chip: {
+    borderWidth: 1, borderColor: COLORS.lineStrong, borderRadius: 999,
+    paddingHorizontal: 13, paddingVertical: 7, backgroundColor: COLORS.panel,
+  },
+  dayChip: {
+    width: 38, height: 38, borderRadius: 19, borderWidth: 1,
+    borderColor: COLORS.lineStrong, backgroundColor: COLORS.panel,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  chipOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  chipText: { color: COLORS.muted, fontSize: 13, fontWeight: '600' },
+  chipTextOn: { color: COLORS.bg },
+
+  monthDays: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
+  dayCell: {
+    width: 40, height: 34, borderRadius: 10, borderWidth: 1,
+    borderColor: COLORS.line, backgroundColor: COLORS.panel,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  fieldRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 13, marginBottom: 14,
+  },
+  fieldLabel: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
+  fieldValue: { color: COLORS.espressoLight, fontSize: 14, fontWeight: '600' },
+
+  primaryBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center', marginTop: 4,
+  },
+  primaryBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '700' },
+
+  pickerBtns: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 10,
+    marginTop: 12, paddingHorizontal: 4,
   },
-  modalMonth: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF },
-  navArrow: { color: COLORS.espressoLight, fontSize: 28, paddingHorizontal: 14, marginTop: -4 },
-  modalBtns: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    marginTop: 14, paddingHorizontal: 6,
-  },
-  modalBtn: { color: COLORS.espresso, fontSize: 15, fontWeight: '700' },
-  modalBtnGhost: { color: COLORS.muted, fontSize: 15, fontWeight: '600' },
+  linkBtn: { color: COLORS.espresso, fontSize: 15, fontWeight: '700' },
+  ghostBtn: { color: COLORS.muted, fontSize: 15, fontWeight: '600' },
 });

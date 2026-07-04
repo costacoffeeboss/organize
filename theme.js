@@ -18,6 +18,7 @@ export const COLORS = {
   espresso: '#4b3626',    // deep accent (buttons, ticks, fills)
   espressoLight: '#5f4632',
   crema: '#e3d3b2',       // warm highlight surface
+  gold: '#b8874b',        // reminders (birthdays etc.) on the calendar
   danger: '#b3423a',      // overdue / delete
 };
 
