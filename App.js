@@ -318,6 +318,8 @@ export default function App() {
                 journal={journal}
                 saveEntry={saveEntry}
                 deleteEntry={deleteEntry}
+                habits={habits}
+                todos={todos}
               />
             )}
           </Tab.Screen>

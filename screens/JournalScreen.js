@@ -5,17 +5,22 @@
 //  Writing opens a FULL page — a blank page invites more than a box.
 // =====================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Modal,
   KeyboardAvoidingView, Platform, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SERIF } from '../theme';
 import { todayKey, niceDate, currentStreak } from '../utils/dates';
+import { getNotices } from '../utils/noticer';
 import ScreenHeader from '../components/ScreenHeader';
+import CompanionCard from '../components/CompanionCard';
 import CalendarPager from '../components/CalendarPager';
 import FAB from '../components/FAB';
+
+const DISMISSED_KEY = '@organize_dismissed_notices';
 
 export const MOODS = [
   { id: 'driven', label: 'Driven', emoji: '🔥' },
@@ -34,22 +39,42 @@ const PROMPTS = [
   'What did today teach you?',
 ];
 
-export default function JournalScreen({ journal, saveEntry, deleteEntry }) {
+export default function JournalScreen({ journal, saveEntry, deleteEntry, habits, todos }) {
   const today = todayKey();
   const [editingKey, setEditingKey] = useState(null); // day being written/read
   const [draft, setDraft] = useState('');
   const [mood, setMood] = useState(null);
+  const [dismissed, setDismissed] = useState([]);
+  const [seedPrompt, setSeedPrompt] = useState(null); // companion question → composer
 
   const entryDays = new Set(Object.keys(journal));
   const streak = currentStreak(entryDays);
   const todayEntry = journal[today];
   const prompt = PROMPTS[new Date().getDate() % PROMPTS.length];
 
-  function openDay(key) {
+  // --- The companion: what has Organize noticed today? ---
+  useEffect(() => {
+    AsyncStorage.getItem(DISMISSED_KEY)
+      .then((v) => { if (v) setDismissed(JSON.parse(v)); })
+      .catch(() => {});
+  }, []);
+
+  const notices = getNotices({ habits: habits || [], todos: todos || [], journal, today });
+  const notice = notices.find((n) => !dismissed.includes(n.id));
+
+  function dismissNotice(n) {
+    // Only today's dismissals are worth keeping (ids embed the date).
+    const next = [...dismissed, n.id].filter((id) => id.endsWith(today));
+    setDismissed(next);
+    AsyncStorage.setItem(DISMISSED_KEY, JSON.stringify(next)).catch(() => {});
+  }
+
+  function openDay(key, seed = null) {
     if (key > today) return; // can't journal the future
     const existing = journal[key];
     setDraft(existing ? existing.text : '');
     setMood(existing ? existing.mood : null);
+    setSeedPrompt(seed);
     setEditingKey(key);
   }
 
@@ -83,6 +108,15 @@ export default function JournalScreen({ journal, saveEntry, deleteEntry }) {
       />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+        {/* The companion's observation, when it has one */}
+        {notice && (
+          <CompanionCard
+            notice={notice}
+            onWrite={() => openDay(today, notice.question)}
+            onDismiss={() => dismissNotice(notice)}
+          />
+        )}
+
         {/* Today's card: the entry if written, otherwise a gentle prompt */}
         <TouchableOpacity style={styles.todayCard} onPress={() => openDay(today)} activeOpacity={0.85}>
           <View style={styles.todayHead}>
@@ -158,10 +192,11 @@ export default function JournalScreen({ journal, saveEntry, deleteEntry }) {
               ))}
             </View>
 
-            {/* The page itself — all remaining space is for writing */}
+            {/* The page itself — all remaining space is for writing.
+                If the companion asked something, its question is the prompt. */}
             <TextInput
               style={styles.page}
-              placeholder={prompt}
+              placeholder={seedPrompt || prompt}
               placeholderTextColor={COLORS.muted2}
               value={draft}
               onChangeText={setDraft}
