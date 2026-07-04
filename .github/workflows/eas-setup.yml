@@ -1,0 +1,43 @@
+name: One-time EAS setup
+
+# Run this ONCE (Actions tab → this workflow → Run workflow) after the
+# EXPO_TOKEN secret is added. It registers the project on expo.dev,
+# wires app.json with the project ID + update URL, and commits that back.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: Register project on expo.dev
+        run: eas init --non-interactive --force
+
+      - name: Configure EAS Update (adds updates.url to app.json)
+        run: eas update:configure --non-interactive
+
+      - name: Commit project config back to the repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app.json
+          git diff --cached --quiet || git commit -m "Wire EAS project ID and update URL into app.json"
+          git push

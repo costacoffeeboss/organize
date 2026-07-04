@@ -26,7 +26,19 @@ npm run ios      # run on an iOS simulator/device (macOS only)
 
 ## Viewing the landing page
 
-Just open `landing/index.html` in any browser — no build step.
+Just open `landing/index.html` in any browser — no build step. Pushes to `master`
+also deploy it to GitHub Pages via `.github/workflows/deploy-pages.yml`.
+
+## Builds & over-the-air updates (EAS)
+
+The installed app (TestFlight) updates itself over the air — no dev server needed:
+
+- **Every push to `master`** → `.github/workflows/eas-update.yml` publishes the JS
+  via EAS Update; installed builds fetch it next time the app opens.
+- **Native changes only** (SDK bump, new native module, icons/config) →
+  run the `Build iOS (TestFlight)` workflow manually from the Actions tab.
+- One-time bootstrap lives in `.github/workflows/eas-setup.yml` (registers the
+  project on expo.dev). Requires an `EXPO_TOKEN` repository secret.
 
 ## Tech
 

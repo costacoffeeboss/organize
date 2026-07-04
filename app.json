@@ -6,10 +6,20 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 5000
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.costacoffeeboss.organize",
+      "buildNumber": "1"
     },
     "android": {
+      "package": "com.costacoffeeboss.organize",
       "adaptiveIcon": {
         "backgroundColor": "#ecdfc8",
         "foregroundImage": "./assets/android-icon-foreground.png",
