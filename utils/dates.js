@@ -145,6 +145,14 @@ export function reminderOccursOn(reminder, key) {
 //  Formatting + month grids
 // =====================================================================
 
+// "Morning" / "Afternoon" / "Evening" — for greeting the user by name.
+export function greetingLabel(d = new Date()) {
+  const h = d.getHours();
+  if (h < 12) return 'Morning';
+  if (h < 18) return 'Afternoon';
+  return 'Evening';
+}
+
 // "Thursday 2 July"
 export function niceDate(key = todayKey()) {
   return parseKey(key).toLocaleDateString('en-GB', {

@@ -2,6 +2,9 @@
 //  TodoRow — one to-do in a list. Shared by the To-dos tab and the
 //  Calendar tab so ticks look and behave identically everywhere.
 //
+//  Ticking gives a small spring "pop" on the checkbox — the tiny
+//  reward that makes finishing things feel finished.
+//
 //  Props:
 //    title       — the text
 //    done        — is it ticked?
@@ -11,16 +14,33 @@
 //    onLongPress — hold = delete
 // =====================================================================
 
-import React from 'react';
-import { Text, TouchableOpacity, View, StyleSheet } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { Text, TouchableOpacity, Animated, StyleSheet } from 'react-native';
 import { COLORS } from '../theme';
 
 export default function TodoRow({ title, done, meta, metaColor, onToggle, onLongPress }) {
+  const pop = useRef(new Animated.Value(1)).current;
+  const wasDone = useRef(done);
+
+  useEffect(() => {
+    if (done && !wasDone.current) {
+      // Just ticked: overshoot then settle.
+      pop.setValue(0.4);
+      Animated.spring(pop, {
+        toValue: 1, friction: 4, tension: 220, useNativeDriver: true,
+      }).start();
+    }
+    wasDone.current = done;
+  }, [done]);
+
   return (
     <TouchableOpacity style={styles.row} onPress={onToggle} onLongPress={onLongPress}>
-      <View style={[styles.check, done && styles.checkOn]}>
+      <Animated.View style={[
+        styles.check, done && styles.checkOn,
+        { transform: [{ scale: pop }] },
+      ]}>
         {done && <Text style={styles.checkMark}>✓</Text>}
-      </View>
+      </Animated.View>
       <Text style={[styles.title, done && styles.titleDone]} numberOfLines={2}>
         {title}
       </Text>

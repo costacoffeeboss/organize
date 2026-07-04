@@ -13,6 +13,7 @@
 // =====================================================================
 
 import React, { useState, useEffect } from 'react';
+import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -29,6 +30,7 @@ import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import HabitsScreen from './screens/HabitsScreen';
 import JournalScreen from './screens/JournalScreen';
+import WelcomeScreen from './screens/WelcomeScreen';
 
 // Storage keys. (Habits keep the old "atomic" key so nothing is lost.)
 const HABITS_KEY = '@atomic_habits_v1';
@@ -37,6 +39,8 @@ const TODOS_KEY = '@organize_todos_v2';
 const EVENTS_KEY = '@organize_events_v1';
 const REMINDERS_KEY = '@organize_reminders_v1';
 const JOURNAL_KEY = '@organize_journal_v1';
+const WELCOME_KEY = '@organize_welcomed_v1';
+const NAME_KEY = '@organize_name';
 
 const Tab = createBottomTabNavigator();
 
@@ -94,6 +98,8 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [journal, setJournal] = useState({});
+  const [welcomed, setWelcomed] = useState(false);
+  const [name, setName] = useState('');
   const [loaded, setLoaded] = useState(false);
 
   // --- Load everything once, when the app opens ---
@@ -102,6 +108,7 @@ export default function App() {
       try {
         const pairs = await AsyncStorage.multiGet([
           HABITS_KEY, TODOS_KEY, TODOS_V1_KEY, EVENTS_KEY, REMINDERS_KEY, JOURNAL_KEY,
+          WELCOME_KEY, NAME_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -120,6 +127,9 @@ export default function App() {
         setEvents(val(3) || []);
         setReminders(val(4) || []);
         setJournal(val(5) || {});
+        // Welcome flag + name are plain strings, not JSON.
+        setWelcomed(pairs[6][1] === '1');
+        setName(pairs[7][1] || '');
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -251,6 +261,15 @@ export default function App() {
     });
   }
 
+  // ================= Welcome =================
+
+  function finishWelcome(chosenName) {
+    setName(chosenName);
+    setWelcomed(true);
+    AsyncStorage.setItem(WELCOME_KEY, '1').catch(() => {});
+    AsyncStorage.setItem(NAME_KEY, chosenName).catch(() => {});
+  }
+
   // ================= Navigation =================
 
   const ICONS = {
@@ -259,6 +278,21 @@ export default function App() {
     'Habits': 'flame-outline',
     'Journal': 'book-outline',
   };
+
+  // Hold on the cream background until storage has answered — avoids
+  // flashing the tabs at a first-time user (or the welcome at a regular).
+  if (!loaded) {
+    return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />;
+  }
+
+  if (!welcomed) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <WelcomeScreen onDone={finishWelcome} />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
@@ -285,6 +319,7 @@ export default function App() {
                 addTodo={addTodo}
                 toggleTodo={toggleTodo}
                 deleteTodo={deleteTodo}
+                name={name}
               />
             )}
           </Tab.Screen>

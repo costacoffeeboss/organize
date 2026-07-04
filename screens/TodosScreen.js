@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../theme';
 import {
-  todayKey, shortDate, niceDate, repeatLabel, WEEKDAY_LETTERS,
+  todayKey, shortDate, niceDate, repeatLabel, greetingLabel, WEEKDAY_LETTERS,
 } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import TodoRow from '../components/TodoRow';
@@ -37,7 +37,7 @@ const REPEAT_MODES = [
   { id: 'monthly', label: 'Monthly' },
 ];
 
-export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
+export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo, name }) {
   const today = todayKey();
 
   // Which groups are open. To-do starts open (it's the working list),
@@ -168,7 +168,11 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Organize" subtitle={niceDate()} />
+      {/* "Morning, Sam" — the landing page's phone mock, made real */}
+      <ScreenHeader
+        title={name ? `${greetingLabel()}, ${name}` : 'Organize'}
+        subtitle={niceDate()}
+      />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
         {empty && (

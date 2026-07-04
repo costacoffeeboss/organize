@@ -7,9 +7,10 @@
 //  The rail remembers which part you had open last time.
 // =====================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Animated, Easing,
+  Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +26,52 @@ const PARTS = [
   { id: 'tracker', label: 'Tracker' },
   { id: 'add', label: 'Add' },
 ];
+
+// --- One row in the Today checklist (module-level so its tick-pop
+//     animation survives parent re-renders) ---
+function HabitRow({ habit, today, onToggle, onLongPress }) {
+  const done = habit.lastDone === today;
+  const pop = useRef(new Animated.Value(1)).current;
+  const wasDone = useRef(done);
+
+  useEffect(() => {
+    if (done && !wasDone.current) {
+      pop.setValue(0.4);
+      Animated.spring(pop, {
+        toValue: 1, friction: 4, tension: 220, useNativeDriver: true,
+      }).start();
+    }
+    wasDone.current = done;
+  }, [done]);
+
+  return (
+    <TouchableOpacity style={styles.row} onPress={onToggle} onLongPress={onLongPress}>
+      <Animated.View style={[styles.check, done && styles.checkOn, { transform: [{ scale: pop }] }]}>
+        {done && <Text style={styles.checkMark}>✓</Text>}
+      </Animated.View>
+      <Text style={[styles.habitName, done && styles.habitNameDone]}>
+        {habit.name}
+      </Text>
+      {habit.streak > 0 && <Text style={styles.streak}>🔥 {habit.streak}</Text>}
+    </TouchableOpacity>
+  );
+}
+
+// --- One row in the Tracker: name + the last 7 days as mini cells ---
+function TrackerRow({ habit, today, onOpen, onLongPress }) {
+  const days = new Set(habit.history || []);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+  return (
+    <TouchableOpacity style={styles.row} onPress={onOpen} onLongPress={onLongPress}>
+      <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
+      <View style={styles.weekStrip}>
+        {week.map((k) => (
+          <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
+        ))}
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
   const [part, setPart] = useState('today');
@@ -47,6 +94,15 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
   const total = habits.length;
   const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
 
+  // The progress bar glides to its new width instead of jumping.
+  const barAnim = useRef(new Animated.Value(percent)).current;
+  useEffect(() => {
+    Animated.timing(barAnim, {
+      toValue: percent, duration: 500,
+      easing: Easing.out(Easing.cubic), useNativeDriver: false, // width can't use native driver
+    }).start();
+  }, [percent]);
+
   function onAdd() {
     const name = newHabit.trim();
     if (!name) return;
@@ -60,46 +116,6 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => deleteHabit(habit.id) },
     ]);
-  }
-
-  // --- One row in the Today checklist ---
-  function HabitRow({ habit }) {
-    const done = habit.lastDone === today;
-    return (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => toggleHabit(habit.id)}
-        onLongPress={() => onLongPress(habit)}
-      >
-        <View style={[styles.check, done && styles.checkOn]}>
-          {done && <Text style={styles.checkMark}>✓</Text>}
-        </View>
-        <Text style={[styles.habitName, done && styles.habitNameDone]}>
-          {habit.name}
-        </Text>
-        {habit.streak > 0 && <Text style={styles.streak}>🔥 {habit.streak}</Text>}
-      </TouchableOpacity>
-    );
-  }
-
-  // --- One row in the Tracker: name + the last 7 days as mini cells ---
-  function TrackerRow({ habit }) {
-    const days = new Set(habit.history || []);
-    const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
-    return (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => setOpenId(habit.id)}
-        onLongPress={() => onLongPress(habit)}
-      >
-        <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
-        <View style={styles.weekStrip}>
-          {week.map((k) => (
-            <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
-          ))}
-        </View>
-      </TouchableOpacity>
-    );
   }
 
   const open = habits.find((h) => h.id === openId);
@@ -137,13 +153,23 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
                   {doneCount}<Text style={styles.summaryDim}> / {total}</Text>
                 </Text>
                 <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: `${percent}%` }]} />
+                  <Animated.View style={[styles.barFill, {
+                    width: barAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+                  }]} />
                 </View>
               </View>
               {habits.length === 0 && (
                 <Text style={styles.empty}>No habits yet — add your first from the rail.</Text>
               )}
-              {habits.map((h) => <HabitRow key={h.id} habit={h} />)}
+              {habits.map((h) => (
+                <HabitRow
+                  key={h.id}
+                  habit={h}
+                  today={today}
+                  onToggle={() => toggleHabit(h.id)}
+                  onLongPress={() => onLongPress(h)}
+                />
+              ))}
             </ScrollView>
           )}
 
@@ -153,7 +179,15 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
               {habits.length === 0 && (
                 <Text style={styles.empty}>Nothing to track yet.</Text>
               )}
-              {habits.map((h) => <TrackerRow key={h.id} habit={h} />)}
+              {habits.map((h) => (
+                <TrackerRow
+                  key={h.id}
+                  habit={h}
+                  today={today}
+                  onOpen={() => setOpenId(h.id)}
+                  onLongPress={() => onLongPress(h)}
+                />
+              ))}
             </ScrollView>
           )}
 

@@ -8,13 +8,25 @@
 //    onDismiss — hide this notice for the rest of the day
 // =====================================================================
 
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Animated, Easing, StyleSheet } from 'react-native';
 import { COLORS, SERIF } from '../theme';
 
 export default function CompanionCard({ notice, onWrite, onDismiss }) {
+  // Arrive gently — a companion shouldn't pounce.
+  const inAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(inAnim, {
+      toValue: 1, duration: 500, delay: 150,
+      easing: Easing.out(Easing.cubic), useNativeDriver: true,
+    }).start();
+  }, []);
+
   return (
-    <View style={styles.card}>
+    <Animated.View style={[styles.card, {
+      opacity: inAnim,
+      transform: [{ translateY: inAnim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
+    }]}>
       <View style={styles.head}>
         <View style={styles.dot} />
         <Text style={styles.label}>Organize noticed</Text>
@@ -33,7 +45,7 @@ export default function CompanionCard({ notice, onWrite, onDismiss }) {
       <TouchableOpacity onPress={onWrite}>
         <Text style={styles.action}>Write about it ›</Text>
       </TouchableOpacity>
-    </View>
+    </Animated.View>
   );
 }
 
