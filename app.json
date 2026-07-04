@@ -11,7 +11,8 @@
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 5000
+      "fallbackToCacheTimeout": 5000,
+      "url": "https://u.expo.dev/d47274fa-5fef-47f1-9976-f885ba9f0c10"
     },
     "ios": {
       "supportsTablet": true,
@@ -29,6 +30,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d47274fa-5fef-47f1-9976-f885ba9f0c10"
+      }
+    },
+    "owner": "costasbowgen"
   }
 }
