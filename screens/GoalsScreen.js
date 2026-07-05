@@ -1,17 +1,18 @@
 // =====================================================================
 //  Goals tab
-//  First visit: a short introduction to SMART goals. After that: your
-//  goals as cards — progress bar from milestones, days-to-target —
-//  with a guided creator that walks each letter of SMART:
-//    S  what exactly will you achieve      → "specific"
-//    M  how you'll measure it              → tickable milestones
-//    A+R why it's realistic and matters    → "why"
-//    T  when it's due                      → target date
+//  Zero-friction first: type a title, save — done. Making it SMART is
+//  an invitation, not a toll gate:
+//    · quick-add offers "Just save" or "Save & make it SMART"
+//    · any card expands in place to show its milestones (tickable)
+//    · "Make it SMART ›" opens the full editor to flesh the goal out
+//      any time — specific, milestones, why, target date
+//  The inspiration quiz (components/GoalQuiz) feeds the editor with
+//  ready-made titles + starter milestones.
 // =====================================================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Easing,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Modal,
   KeyboardAvoidingView, Platform, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { todayKey, shortDate, diffDays } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import ModalShell from '../components/ModalShell';
 import CalendarPager from '../components/CalendarPager';
+import GoalQuiz from '../components/GoalQuiz';
 import Rise from '../components/Rise';
 import FAB from '../components/FAB';
 
@@ -34,10 +36,13 @@ const SMART = [
   { letter: 'T', word: 'Time-bound', line: 'Give it a date. A goal without a deadline is a wish.' },
 ];
 
-// ---------------------------------------------------------------------
-//  The SMART explainer (first visit, and revisitable any time)
-// ---------------------------------------------------------------------
-function SmartIntro({ onStart }) {
+// How SMART is a goal already? (drives the "Make it SMART" nudge)
+function smartness(g) {
+  return (g.specific ? 1 : 0) + (g.milestones.length ? 1 : 0)
+    + (g.why ? 1 : 0) + (g.targetDate ? 1 : 0);
+}
+
+function SmartIntro({ onStart, onQuiz }) {
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
       <Rise delay={0}>
@@ -47,8 +52,8 @@ function SmartIntro({ onStart }) {
       </Rise>
       <Rise delay={150}>
         <Text style={styles.introSub}>
-          Good goals aren't vague hopes — they're SMART. Five letters that turn
-          "someday" into a plan:
+          Start with any goal — a title is enough. When you're ready, make it
+          SMART and it stops being a wish:
         </Text>
       </Rise>
       {SMART.map((s, i) => (
@@ -68,28 +73,35 @@ function SmartIntro({ onStart }) {
         <TouchableOpacity style={styles.primaryBtn} onPress={onStart} activeOpacity={0.85}>
           <Text style={styles.primaryBtnText}>Set your first goal</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={onQuiz} style={styles.quizLink}>
+          <Text style={styles.quizLinkText}>Not sure what to aim for? Take the quiz ›</Text>
+        </TouchableOpacity>
       </Rise>
     </ScrollView>
   );
 }
 
-// ---------------------------------------------------------------------
-
 export default function GoalsScreen({
-  goals, addGoal, toggleMilestone, markGoalAchieved, deleteGoal,
+  goals, addGoal, updateGoal, toggleMilestone, markGoalAchieved, deleteGoal,
 }) {
   const today = todayKey();
-  const [introSeen, setIntroSeen] = useState(true); // assume seen until storage answers
+  const [introSeen, setIntroSeen] = useState(true);
   const [showIntroModal, setShowIntroModal] = useState(false);
-  const [openId, setOpenId] = useState(null);
+  const [showQuiz, setShowQuiz] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
 
-  // --- Creator state ---
-  const [showCreate, setShowCreate] = useState(false);
-  const [page, setPage] = useState('form'); // 'form' | 'date'
+  // --- Quick add ---
+  const [showQuick, setShowQuick] = useState(false);
+  const [quickTitle, setQuickTitle] = useState('');
+
+  // --- Editor (create with prefill, or edit an existing goal) ---
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null); // null = creating
+  const [page, setPage] = useState('form');
   const [title, setTitle] = useState('');
   const [specific, setSpecific] = useState('');
   const [why, setWhy] = useState('');
-  const [milestones, setMilestones] = useState([]);
+  const [milestones, setMilestones] = useState([]); // [{id?, text, done}]
   const [milestoneDraft, setMilestoneDraft] = useState('');
   const [targetDate, setTargetDate] = useState(null);
 
@@ -99,32 +111,68 @@ export default function GoalsScreen({
       .catch(() => {});
   }, []);
 
-  function startFirstGoal() {
+  function markIntroSeen() {
     setIntroSeen(true);
     AsyncStorage.setItem(INTRO_KEY, '1').catch(() => {});
-    openCreate();
   }
 
-  function openCreate() {
-    setPage('form'); setTitle(''); setSpecific(''); setWhy('');
-    setMilestones([]); setMilestoneDraft(''); setTargetDate(null);
-    setShowIntroModal(false); setShowCreate(true);
+  function openQuick() {
+    markIntroSeen();
+    setQuickTitle('');
+    setShowQuick(true);
+  }
+
+  function openEditor({ goal = null, prefillTitle = '', prefillMilestones = [] } = {}) {
+    markIntroSeen();
+    setEditingId(goal ? goal.id : null);
+    setPage('form');
+    setTitle(goal ? goal.title : prefillTitle);
+    setSpecific(goal ? goal.specific : '');
+    setWhy(goal ? goal.why : '');
+    setMilestones(goal
+      ? goal.milestones.map((m) => ({ ...m }))
+      : prefillMilestones.map((text, i) => ({ text, done: false })));
+    setMilestoneDraft('');
+    setTargetDate(goal ? goal.targetDate : null);
+    setShowQuick(false); setShowQuiz(false); setShowIntroModal(false);
+    setEditorOpen(true);
+  }
+
+  function quickSave() {
+    const t = quickTitle.trim();
+    if (!t) return;
+    addGoal({ title: t, specific: '', why: '', milestones: [], targetDate: null });
+    setShowQuick(false);
   }
 
   function addMilestoneDraft() {
     const t = milestoneDraft.trim();
     if (!t) return;
-    setMilestones((prev) => [...prev, t]);
+    setMilestones((prev) => [...prev, { text: t, done: false }]);
     setMilestoneDraft('');
   }
 
-  const canSave = title.trim() && (milestones.length > 0 || milestoneDraft.trim()) && targetDate;
-
-  function onCreate() {
-    if (!canSave) return;
-    const all = milestoneDraft.trim() ? [...milestones, milestoneDraft.trim()] : milestones;
-    addGoal({ title: title.trim(), specific: specific.trim(), why: why.trim(), milestones: all, targetDate });
-    setShowCreate(false);
+  function editorSave() {
+    if (!title.trim()) return;
+    const all = milestoneDraft.trim()
+      ? [...milestones, { text: milestoneDraft.trim(), done: false }]
+      : milestones;
+    if (editingId) {
+      updateGoal(editingId, {
+        title: title.trim(), specific: specific.trim(), why: why.trim(),
+        targetDate,
+        milestones: all.map((m, i) => ({
+          id: m.id || `${editingId}-${Date.now()}-${i}`,
+          text: m.text, done: !!m.done,
+        })),
+      });
+    } else {
+      addGoal({
+        title: title.trim(), specific: specific.trim(), why: why.trim(),
+        milestones: all.map((m) => m.text), targetDate,
+      });
+    }
+    setEditorOpen(false);
   }
 
   function onLongPress(goal) {
@@ -136,8 +184,6 @@ export default function GoalsScreen({
 
   const active = goals.filter((g) => !g.achievedOn);
   const achieved = goals.filter((g) => g.achievedOn);
-  const open = goals.find((g) => g.id === openId);
-  const openDone = open ? open.milestones.filter((m) => m.done).length : 0;
 
   function daysLeftLabel(g) {
     if (g.achievedOn) return 'achieved ✓';
@@ -153,29 +199,80 @@ export default function GoalsScreen({
     const total = goal.milestones.length;
     const pct = total === 0 ? 0 : Math.round((done / total) * 100);
     const overdue = !goal.achievedOn && goal.targetDate && goal.targetDate < today;
-    const next = goal.milestones.find((m) => !m.done);
+    const isOpen = expandedId === goal.id;
+    const needsSmart = smartness(goal) < 2;
+
     return (
       <TouchableOpacity
         style={[styles.card, goal.achievedOn && styles.cardAchieved]}
-        onPress={() => setOpenId(goal.id)}
+        onPress={() => setExpandedId(isOpen ? null : goal.id)}
         onLongPress={() => onLongPress(goal)}
         activeOpacity={0.85}
       >
         <View style={styles.cardHead}>
           <Text style={styles.cardTitle} numberOfLines={2}>{goal.title}</Text>
-          <Text style={[styles.daysLeft, overdue && { color: COLORS.danger },
-            goal.achievedOn && { color: COLORS.espresso }]}>
-            {daysLeftLabel(goal)}
-          </Text>
+          <View style={{ alignItems: 'flex-end', gap: 3 }}>
+            {daysLeftLabel(goal) && (
+              <Text style={[styles.daysLeft, overdue && { color: COLORS.danger },
+                goal.achievedOn && { color: COLORS.espresso }]}>
+                {daysLeftLabel(goal)}
+              </Text>
+            )}
+            <Text style={styles.cardChevron}>{isOpen ? '▾' : '▸'}</Text>
+          </View>
         </View>
-        <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${goal.achievedOn ? 100 : pct}%` }]} />
-        </View>
+
+        {total > 0 && (
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, { width: `${goal.achievedOn ? 100 : pct}%` }]} />
+          </View>
+        )}
         <Text style={styles.cardMeta}>
           {goal.achievedOn
             ? `Achieved ${shortDate(goal.achievedOn)}`
-            : `${done} of ${total} milestones${next ? ` · next: ${next.text}` : ''}`}
+            : total > 0
+              ? `${done} of ${total} milestones`
+              : 'Just an idea so far — open it up.'}
         </Text>
+
+        {/* -------- expanded: milestones + actions, right in the list -------- */}
+        {isOpen && (
+          <Rise delay={0}>
+            <View style={styles.expandArea}>
+              {goal.milestones.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={styles.milestoneLine}
+                  onPress={() => toggleMilestone(goal.id, m.id)}
+                >
+                  <View style={[styles.check, m.done && styles.checkOn]}>
+                    {m.done && <Text style={styles.checkMark}>✓</Text>}
+                  </View>
+                  <Text style={[styles.milestoneText, m.done && styles.milestoneDone]}>
+                    {m.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {total === 0 && (
+                <Text style={styles.noMilestones}>No milestones yet — that's where SMART comes in.</Text>
+              )}
+              {!!goal.why && <Text style={styles.whyLine}>Why: {goal.why}</Text>}
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity onPress={() => openEditor({ goal })}>
+                  <Text style={styles.actionLink}>
+                    {needsSmart ? 'Make it SMART ›' : 'Edit goal ›'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => markGoalAchieved(goal.id)}>
+                  <Text style={[styles.actionLink, { color: COLORS.gold }]}>
+                    {goal.achievedOn ? 'Reopen' : 'Mark achieved 🎉'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Rise>
+        )}
       </TouchableOpacity>
     );
   }
@@ -185,12 +282,15 @@ export default function GoalsScreen({
       <ScreenHeader title="Goals" subtitle="Dream big, plan small" />
 
       {!introSeen ? (
-        <SmartIntro onStart={startFirstGoal} />
+        <SmartIntro
+          onStart={() => { markIntroSeen(); openQuick(); }}
+          onQuiz={() => { markIntroSeen(); setShowQuiz(true); }}
+        />
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
           {goals.length === 0 && (
             <Text style={styles.empty}>
-              No goals yet. Tap ＋ to set one —{'\n'}five SMART questions and it's real.
+              No goals yet. Tap ＋ and just write one down —{'\n'}you can make it SMART later.
             </Text>
           )}
           {active.map((g) => <GoalCard key={g.id} goal={g} />)}
@@ -200,15 +300,53 @@ export default function GoalsScreen({
               {achieved.map((g) => <GoalCard key={g.id} goal={g} />)}
             </View>
           )}
-          <TouchableOpacity onPress={() => setShowIntroModal(true)} style={styles.introLink}>
-            <Text style={styles.introLinkText}>What makes a good goal? ›</Text>
-          </TouchableOpacity>
+          <View style={styles.linksRow}>
+            <TouchableOpacity onPress={() => setShowQuiz(true)}>
+              <Text style={styles.introLinkText}>Need a spark? Take the quiz ›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowIntroModal(true)}>
+              <Text style={styles.introLinkText}>What makes a good goal? ›</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       )}
 
-      {introSeen && <FAB onPress={openCreate} />}
+      {introSeen && <FAB onPress={openQuick} />}
 
-      {/* ============ SMART refresher pop-up ============ */}
+      {/* ============ Quick add: title now, SMART optional ============ */}
+      <ModalShell visible={showQuick} onClose={() => setShowQuick(false)} title="New goal">
+        <View>
+          <TextInput
+            style={styles.input}
+            placeholder="Run a 10k…"
+            placeholderTextColor={COLORS.muted2}
+            value={quickTitle}
+            onChangeText={setQuickTitle}
+            onSubmitEditing={quickSave}
+            returnKeyType="done"
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.primaryBtn, { marginTop: 14 }, !quickTitle.trim() && { opacity: 0.4 }]}
+            onPress={() => openEditor({ prefillTitle: quickTitle.trim() })}
+            disabled={!quickTitle.trim()}
+          >
+            <Text style={styles.primaryBtnText}>Save & make it SMART</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.ghostBtn, !quickTitle.trim() && { opacity: 0.4 }]}
+            onPress={quickSave}
+            disabled={!quickTitle.trim()}
+          >
+            <Text style={styles.ghostBtnText}>Just save it for now</Text>
+          </TouchableOpacity>
+          <Text style={styles.quickHint}>
+            Either way it's saved — you can flesh it out whenever.
+          </Text>
+        </View>
+      </ModalShell>
+
+      {/* ============ SMART refresher ============ */}
       <ModalShell
         visible={showIntroModal}
         onClose={() => setShowIntroModal(false)}
@@ -229,17 +367,27 @@ export default function GoalsScreen({
         </View>
       </ModalShell>
 
-      {/* ============ Full-page goal creator ============ */}
-      <Modal visible={showCreate} animationType="slide" onRequestClose={() => setShowCreate(false)}>
+      {/* ============ Inspiration quiz ============ */}
+      <GoalQuiz
+        visible={showQuiz}
+        onClose={() => setShowQuiz(false)}
+        onPick={(idea) => openEditor({ prefillTitle: idea.title, prefillMilestones: idea.milestones })}
+        onStartBlank={() => { setShowQuiz(false); openQuick(); }}
+      />
+
+      {/* ============ Full-page editor (create or make-it-SMART) ============ */}
+      <Modal visible={editorOpen} animationType="slide" onRequestClose={() => setEditorOpen(false)}>
         <SafeAreaView style={styles.pageSafe} edges={['top', 'bottom']}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={styles.pageHead}>
-              <TouchableOpacity onPress={() => setShowCreate(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <TouchableOpacity onPress={() => setEditorOpen(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                 <Text style={styles.pageClose}>✕</Text>
               </TouchableOpacity>
-              <Text style={styles.pageTitle}>{page === 'date' ? 'Target date' : 'New goal'}</Text>
-              <TouchableOpacity onPress={onCreate} disabled={!canSave} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                <Text style={[styles.pageSave, !canSave && { opacity: 0.35 }]}>Save</Text>
+              <Text style={styles.pageTitle}>
+                {page === 'date' ? 'Target date' : editingId ? 'Make it SMART' : 'Shape the goal'}
+              </Text>
+              <TouchableOpacity onPress={editorSave} disabled={!title.trim()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={[styles.pageSave, !title.trim() && { opacity: 0.35 }]}>Save</Text>
               </TouchableOpacity>
             </View>
 
@@ -276,9 +424,9 @@ export default function GoalsScreen({
                   <Text style={styles.fieldLabel}>Milestones — how you'll measure it</Text>
                 </View>
                 {milestones.map((m, i) => (
-                  <View key={i} style={styles.milestoneRow}>
+                  <View key={m.id || `new-${i}`} style={styles.milestoneRow}>
                     <Text style={styles.milestoneNum}>{i + 1}</Text>
-                    <Text style={styles.milestoneText}>{m}</Text>
+                    <Text style={[styles.milestoneText, m.done && styles.milestoneDone]}>{m.text}</Text>
                     <TouchableOpacity
                       onPress={() => setMilestones((prev) => prev.filter((_, j) => j !== i))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -325,7 +473,8 @@ export default function GoalsScreen({
                 </TouchableOpacity>
 
                 <Text style={styles.formHint}>
-                  Save needs a title, at least one milestone and a date — that's what makes it SMART.
+                  Only the title is required — every SMART letter you fill makes
+                  the goal more likely to happen.
                 </Text>
               </ScrollView>
             )}
@@ -337,59 +486,19 @@ export default function GoalsScreen({
                   selected={targetDate}
                   onSelect={(k) => { if (k >= today) { setTargetDate(k); setPage('form'); } }}
                 />
-                <TouchableOpacity onPress={() => setPage('form')} style={{ alignSelf: 'flex-end', marginTop: 12 }}>
-                  <Text style={styles.pageSave}>Back</Text>
-                </TouchableOpacity>
+                <View style={styles.dateBtns}>
+                  <TouchableOpacity onPress={() => { setTargetDate(null); setPage('form'); }}>
+                    <Text style={styles.ghostBtnText}>Clear</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setPage('form')}>
+                    <Text style={styles.pageSave}>Back</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
           </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
-
-      {/* ============ Goal detail ============ */}
-      <ModalShell visible={!!open} onClose={() => setOpenId(null)} title={open ? open.title : ''}>
-        {open && (
-          <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
-            {!!open.specific && <Text style={styles.detailText}>{open.specific}</Text>}
-
-            <Text style={styles.detailLabel}>Milestones · {openDone}/{open.milestones.length}</Text>
-            {open.milestones.map((m) => (
-              <TouchableOpacity
-                key={m.id}
-                style={styles.detailMilestone}
-                onPress={() => toggleMilestone(open.id, m.id)}
-              >
-                <View style={[styles.check, m.done && styles.checkOn]}>
-                  {m.done && <Text style={styles.checkMark}>✓</Text>}
-                </View>
-                <Text style={[styles.milestoneText, m.done && styles.milestoneDone]}>{m.text}</Text>
-              </TouchableOpacity>
-            ))}
-
-            {!!open.why && (
-              <View>
-                <Text style={styles.detailLabel}>Why it matters</Text>
-                <Text style={styles.detailText}>{open.why}</Text>
-              </View>
-            )}
-
-            {open.targetDate && (
-              <Text style={[styles.detailLabel, { marginBottom: 2 }]}>
-                Target · {shortDate(open.targetDate)} {!open.achievedOn && `(${daysLeftLabel(open)})`}
-              </Text>
-            )}
-
-            <TouchableOpacity
-              style={[styles.primaryBtn, { marginTop: 18 }]}
-              onPress={() => { markGoalAchieved(open.id); setOpenId(null); }}
-            >
-              <Text style={styles.primaryBtnText}>
-                {open.achievedOn ? 'Reopen goal' : 'Mark achieved 🎉'}
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        )}
-      </ModalShell>
     </SafeAreaView>
   );
 }
@@ -413,6 +522,8 @@ const styles = StyleSheet.create({
   smartLetter: { color: COLORS.espresso, fontSize: 18, fontWeight: '700', fontFamily: SERIF },
   smartWord: { color: COLORS.ink, fontSize: 15.5, fontWeight: '700' },
   smartLine: { color: COLORS.muted, fontSize: 13.5, lineHeight: 19, marginTop: 2 },
+  quizLink: { alignItems: 'center', marginTop: 16 },
+  quizLinkText: { color: COLORS.espressoLight, fontSize: 14, fontWeight: '700' },
 
   // --- list ---
   empty: { color: COLORS.muted, fontSize: 14.5, lineHeight: 21, textAlign: 'center', marginTop: 40 },
@@ -427,17 +538,41 @@ const styles = StyleSheet.create({
   cardAchieved: { opacity: 0.75 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
   cardTitle: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF, flex: 1 },
-  daysLeft: { color: COLORS.espressoLight, fontSize: 12.5, fontWeight: '700', marginTop: 2 },
+  daysLeft: { color: COLORS.espressoLight, fontSize: 12.5, fontWeight: '700' },
+  cardChevron: { color: COLORS.muted2, fontSize: 13 },
   barTrack: {
     height: 7, borderRadius: 7, backgroundColor: 'rgba(59,44,30,0.08)',
     marginTop: 12, overflow: 'hidden',
   },
   barFill: { height: 7, borderRadius: 7, backgroundColor: COLORS.espresso },
   cardMeta: { color: COLORS.muted, fontSize: 13, marginTop: 9 },
-  introLink: { alignItems: 'center', marginTop: 14 },
+
+  expandArea: {
+    marginTop: 12, paddingTop: 12,
+    borderTopWidth: 1, borderTopColor: COLORS.line,
+  },
+  milestoneLine: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 6 },
+  noMilestones: { color: COLORS.muted2, fontSize: 13, fontStyle: 'italic' },
+  whyLine: { color: COLORS.muted, fontSize: 13, marginTop: 8, fontStyle: 'italic' },
+  actionRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    marginTop: 13, alignItems: 'center',
+  },
+  actionLink: { color: COLORS.espresso, fontSize: 13.5, fontWeight: '700' },
+
+  linksRow: { alignItems: 'center', gap: 10, marginTop: 14 },
   introLinkText: { color: COLORS.espressoLight, fontSize: 13.5, fontWeight: '700' },
 
-  // --- creator page ---
+  // --- quick add ---
+  quickHint: { color: COLORS.muted2, fontSize: 12.5, textAlign: 'center', marginTop: 12 },
+  ghostBtn: {
+    borderWidth: 1, borderColor: COLORS.lineStrong, borderRadius: 14,
+    paddingVertical: 13, alignItems: 'center', marginTop: 9,
+    backgroundColor: COLORS.panel,
+  },
+  ghostBtnText: { color: COLORS.muted, fontSize: 14.5, fontWeight: '700' },
+
+  // --- editor page ---
   pageSafe: { flex: 1, backgroundColor: COLORS.bg },
   pageHead: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -488,15 +623,9 @@ const styles = StyleSheet.create({
   },
   dateLabel: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
   dateValue: { color: COLORS.espressoLight, fontSize: 14, fontWeight: '600' },
+  dateBtns: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, paddingHorizontal: 6 },
   formHint: { color: COLORS.muted2, fontSize: 12.5, lineHeight: 18, marginTop: 18 },
 
-  // --- detail ---
-  detailLabel: {
-    color: COLORS.muted2, fontSize: 11.5, fontWeight: '700',
-    letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 14, marginBottom: 8,
-  },
-  detailText: { color: COLORS.ink, fontSize: 14.5, lineHeight: 21 },
-  detailMilestone: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 7 },
   check: {
     width: 24, height: 24, borderRadius: 8, borderWidth: 2,
     borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center',

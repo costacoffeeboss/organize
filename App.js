@@ -17,8 +17,9 @@ import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+// Material top tabs (parked at the bottom) give us swipe-between-tabs.
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { COLORS } from './theme';
@@ -46,7 +47,7 @@ const STEPS_KEY = '@organize_steps_v1'; // journal's "one step at a time" entrie
 const WELCOME_KEY = '@organize_welcomed_v1';
 const NAME_KEY = '@organize_name';
 
-const Tab = createBottomTabNavigator();
+const Tab = createMaterialTopTabNavigator();
 
 // Make react-navigation's default surfaces match our cream theme.
 const navTheme = {
@@ -317,6 +318,13 @@ export default function App() {
     }]);
   }
 
+  // Flesh a goal out after the fact — "make it more SMART".
+  function updateGoal(goalId, fields) {
+    setGoals((prev) => prev.map((g) =>
+      g.id === goalId ? { ...g, ...fields } : g
+    ));
+  }
+
   function toggleMilestone(goalId, milestoneId) {
     setGoals((prev) => prev.map((g) => {
       if (g.id !== goalId) return g;
@@ -377,21 +385,38 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <NavigationContainer theme={navTheme}>
-        <Tab.Navigator
-          screenOptions={({ route }) => ({
-            headerShown: false,
-            tabBarActiveTintColor: COLORS.espresso,
-            tabBarInactiveTintColor: COLORS.muted2,
-            tabBarStyle: {
-              backgroundColor: COLORS.panel,
-              borderTopColor: COLORS.line,
-            },
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name={ICONS[route.name]} size={size} color={color} />
-            ),
-          })}
-        >
+      {/* bottom edge padded here so the tab bar clears the home indicator */}
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.panel }} edges={['bottom']}>
+        <NavigationContainer theme={navTheme}>
+          <Tab.Navigator
+            tabBarPosition="bottom"
+            screenOptions={({ route }) => ({
+              swipeEnabled: true,
+              lazy: true,
+              tabBarShowIcon: true,
+              tabBarActiveTintColor: COLORS.espresso,
+              tabBarInactiveTintColor: COLORS.muted2,
+              tabBarStyle: {
+                backgroundColor: COLORS.panel,
+                borderTopWidth: 1,
+                borderTopColor: COLORS.line,
+                elevation: 0,
+                shadowOpacity: 0,
+              },
+              tabBarItemStyle: { paddingVertical: 7, paddingHorizontal: 0 },
+              tabBarLabelStyle: {
+                fontSize: 9.5, fontWeight: '600', textTransform: 'none',
+                marginTop: 2, marginHorizontal: 0,
+              },
+              tabBarIconStyle: { width: 24, height: 24, alignSelf: 'center' },
+              // the little espresso line rides along as you swipe
+              tabBarIndicatorStyle: { backgroundColor: COLORS.espresso, height: 2, top: 0 },
+              tabBarPressColor: 'rgba(75,54,38,0.12)',
+              tabBarIcon: ({ color }) => (
+                <Ionicons name={ICONS[route.name]} size={21} color={color} />
+              ),
+            })}
+          >
           <Tab.Screen name="Home">
             {() => (
               <HomeScreen
@@ -445,6 +470,7 @@ export default function App() {
               <GoalsScreen
                 goals={goals}
                 addGoal={addGoal}
+                updateGoal={updateGoal}
                 toggleMilestone={toggleMilestone}
                 markGoalAchieved={markGoalAchieved}
                 deleteGoal={deleteGoal}
@@ -466,8 +492,9 @@ export default function App() {
               />
             )}
           </Tab.Screen>
-        </Tab.Navigator>
-      </NavigationContainer>
+          </Tab.Navigator>
+        </NavigationContainer>
+      </SafeAreaView>
     </SafeAreaProvider>
   );
 }
