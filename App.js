@@ -26,6 +26,7 @@ import {
   todayKey, addDays, parseKey, weekdayIndex,
   nextOccurrence, currentStreak,
 } from './utils/dates';
+import HomeScreen from './screens/HomeScreen';
 import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import HabitsScreen from './screens/HabitsScreen';
@@ -100,6 +101,7 @@ export default function App() {
   const [journal, setJournal] = useState({});
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
+  const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
   const [loaded, setLoaded] = useState(false);
 
   // --- Load everything once, when the app opens ---
@@ -273,6 +275,7 @@ export default function App() {
   // ================= Navigation =================
 
   const ICONS = {
+    'Home': 'home-outline',
     'To-dos': 'checkbox-outline',
     'Calendar': 'calendar-outline',
     'Habits': 'flame-outline',
@@ -312,6 +315,20 @@ export default function App() {
             ),
           })}
         >
+          <Tab.Screen name="Home">
+            {() => (
+              <HomeScreen
+                name={name}
+                habits={habits}
+                todos={todos}
+                events={events}
+                reminders={reminders}
+                journal={journal}
+                toggleTodo={toggleTodo}
+                onSeedJournal={setJournalSeed}
+              />
+            )}
+          </Tab.Screen>
           <Tab.Screen name="To-dos">
             {() => (
               <TodosScreen
@@ -319,7 +336,6 @@ export default function App() {
                 addTodo={addTodo}
                 toggleTodo={toggleTodo}
                 deleteTodo={deleteTodo}
-                name={name}
               />
             )}
           </Tab.Screen>
@@ -353,8 +369,8 @@ export default function App() {
                 journal={journal}
                 saveEntry={saveEntry}
                 deleteEntry={deleteEntry}
-                habits={habits}
-                todos={todos}
+                journalSeed={journalSeed}
+                onSeedConsumed={() => setJournalSeed(null)}
               />
             )}
           </Tab.Screen>

@@ -12,7 +12,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Animated, Easing,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Animated, Easing,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -119,7 +119,7 @@ export default function WelcomeScreen({ onDone }) {
   return (
     <Animated.View style={[styles.root, { opacity: screenFade }]}>
       {/* soft halo breathing in behind everything */}
-      <Animated.View style={[styles.halo, {
+      <Animated.View pointerEvents="none" style={[styles.halo, {
         opacity: halo.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }),
         transform: [{ scale: halo.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
       }]} />
@@ -130,6 +130,14 @@ export default function WelcomeScreen({ onDone }) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <Animated.View style={[styles.stepWrap, { opacity: stepFade }]}>
+            {/* Scrollable so the keyboard can never hide the content —
+                the name step shrinks-and-scrolls instead of vanishing. */}
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
 
             {/* ---------- Step 1: the brand ---------- */}
             {step === 0 && (
@@ -218,6 +226,7 @@ export default function WelcomeScreen({ onDone }) {
                 </Rise>
               </View>
             )}
+            </ScrollView>
           </Animated.View>
 
           {/* progress dots */}
@@ -240,8 +249,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(200,169,126,0.45)',
   },
   safe: { flex: 1 },
-  body: { flex: 1, paddingHorizontal: 32, justifyContent: 'center' },
-  stepWrap: { flex: 1, justifyContent: 'center' },
+  body: { flex: 1, paddingHorizontal: 32 },
+  stepWrap: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: 24 },
   center: { alignItems: 'center' },
 
   wordmark: {

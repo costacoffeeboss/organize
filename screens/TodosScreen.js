@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../theme';
 import {
-  todayKey, shortDate, niceDate, repeatLabel, greetingLabel, WEEKDAY_LETTERS,
+  todayKey, shortDate, niceDate, repeatLabel, WEEKDAY_LETTERS,
 } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import TodoRow from '../components/TodoRow';
@@ -37,7 +37,7 @@ const REPEAT_MODES = [
   { id: 'monthly', label: 'Monthly' },
 ];
 
-export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo, name }) {
+export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
   const today = todayKey();
 
   // Which groups are open. To-do starts open (it's the working list),
@@ -151,13 +151,23 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo, na
     ));
   }
 
-  // An expandable group header: title · count · chevron.
+  // An expandable group header — a full card-height row so it's easy
+  // to hit: title · count pill · chevron.
   function GroupHead({ label, count, open, onPress }) {
     return (
-      <TouchableOpacity style={styles.groupHead} onPress={onPress} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={[styles.groupHead, open && styles.groupHeadOpen]}
+        onPress={onPress}
+        activeOpacity={0.75}
+        hitSlop={{ top: 4, bottom: 4 }}
+      >
         <Text style={styles.groupTitle}>{label}</Text>
         <View style={styles.groupRight}>
-          {count > 0 && <Text style={styles.groupCount}>{count}</Text>}
+          {count > 0 && (
+            <View style={styles.groupCountPill}>
+              <Text style={styles.groupCount}>{count}</Text>
+            </View>
+          )}
           <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
         </View>
       </TouchableOpacity>
@@ -168,11 +178,7 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo, na
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* "Morning, Sam" — the landing page's phone mock, made real */}
-      <ScreenHeader
-        title={name ? `${greetingLabel()}, ${name}` : 'Organize'}
-        subtitle={niceDate()}
-      />
+      <ScreenHeader title="To-dos" subtitle={niceDate()} />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
         {empty && (
@@ -382,19 +388,19 @@ const styles = StyleSheet.create({
   },
   groupHead: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginTop: 10, marginBottom: 8, paddingVertical: 2,
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16,
+    marginTop: 8, marginBottom: 10,
   },
-  groupTitle: {
-    color: COLORS.muted2, fontSize: 12, fontWeight: '700',
-    letterSpacing: 1.5, textTransform: 'uppercase',
+  groupHeadOpen: { borderColor: COLORS.lineStrong },
+  groupTitle: { color: COLORS.ink, fontSize: 16, fontWeight: '700' },
+  groupRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupCountPill: {
+    backgroundColor: 'rgba(75,54,38,0.12)', borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 3,
   },
-  groupRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  groupCount: {
-    color: COLORS.espressoLight, fontSize: 11.5, fontWeight: '700',
-    backgroundColor: 'rgba(75,54,38,0.1)', borderRadius: 999,
-    paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden',
-  },
-  chevron: { color: COLORS.muted2, fontSize: 13 },
+  groupCount: { color: COLORS.espressoLight, fontSize: 13, fontWeight: '700' },
+  chevron: { color: COLORS.espressoLight, fontSize: 17, fontWeight: '600' },
 
   quiet: { color: COLORS.muted, fontSize: 13.5, marginBottom: 10 },
   empty: { color: COLORS.muted, fontSize: 15, textAlign: 'center', marginTop: 50, lineHeight: 22 },

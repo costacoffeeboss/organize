@@ -1,39 +1,37 @@
 // =====================================================================
 //  Habits tab
-//  A slim rail on the left keeps the screen calm — one part at a time:
-//    Today   — the checkable list of daily habits
-//    Tracker — tap a habit for its analytics (heatmap, streaks, %)
-//    Add     — create a new habit
-//  The rail remembers which part you had open last time.
+//  One calm page: the big completion ring up top (like the landing
+//  page mock), then every habit as a rich row — tick it, see its last
+//  seven days at a glance, and tap through for the full analytics.
+//  The floating ＋ adds a new habit.
+//
+//  Row gestures: the checkbox ticks · the row opens analytics ·
+//  a long press deletes.
 // =====================================================================
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Animated, Easing,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Animated,
   Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SERIF } from '../theme';
 import { todayKey, addDays, currentStreak, bestStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
 import ModalShell from '../components/ModalShell';
+import ProgressRing from '../components/ProgressRing';
+import FAB from '../components/FAB';
 
-const SUBTAB_KEY = '@organize_habits_subtab';
-const PARTS = [
-  { id: 'today', label: 'Today' },
-  { id: 'tracker', label: 'Tracker' },
-  { id: 'add', label: 'Add' },
-];
-
-// --- One row in the Today checklist (module-level so its tick-pop
-//     animation survives parent re-renders) ---
-function HabitRow({ habit, today, onToggle, onLongPress }) {
+// One habit: check to tick, tap for analytics, hold to delete.
+// Module-level so the tick-pop animation survives parent re-renders.
+function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
   const done = habit.lastDone === today;
+  const days = new Set(habit.history || []);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+
   const pop = useRef(new Animated.Value(1)).current;
   const wasDone = useRef(done);
-
   useEffect(() => {
     if (done && !wasDone.current) {
       pop.setValue(0.4);
@@ -45,70 +43,57 @@ function HabitRow({ habit, today, onToggle, onLongPress }) {
   }, [done]);
 
   return (
-    <TouchableOpacity style={styles.row} onPress={onToggle} onLongPress={onLongPress}>
-      <Animated.View style={[styles.check, done && styles.checkOn, { transform: [{ scale: pop }] }]}>
-        {done && <Text style={styles.checkMark}>✓</Text>}
-      </Animated.View>
-      <Text style={[styles.habitName, done && styles.habitNameDone]}>
-        {habit.name}
-      </Text>
-      {habit.streak > 0 && <Text style={styles.streak}>🔥 {habit.streak}</Text>}
-    </TouchableOpacity>
-  );
-}
+    <TouchableOpacity
+      style={styles.row}
+      onPress={onOpen}
+      onLongPress={onLongPress}
+      activeOpacity={0.8}
+    >
+      <TouchableOpacity
+        onPress={onToggle}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
+      >
+        <Animated.View style={[styles.check, done && styles.checkOn, { transform: [{ scale: pop }] }]}>
+          {done && <Text style={styles.checkMark}>✓</Text>}
+        </Animated.View>
+      </TouchableOpacity>
 
-// --- One row in the Tracker: name + the last 7 days as mini cells ---
-function TrackerRow({ habit, today, onOpen, onLongPress }) {
-  const days = new Set(habit.history || []);
-  const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
-  return (
-    <TouchableOpacity style={styles.row} onPress={onOpen} onLongPress={onLongPress}>
-      <Text style={styles.habitName} numberOfLines={1}>{habit.name}</Text>
-      <View style={styles.weekStrip}>
-        {week.map((k) => (
-          <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
-        ))}
+      <View style={{ flex: 1, marginLeft: 13 }}>
+        <Text style={[styles.habitName, done && styles.habitNameDone]} numberOfLines={1}>
+          {habit.name}
+        </Text>
+        <View style={styles.weekStrip}>
+          {week.map((k) => (
+            <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.rowRight}>
+        {habit.streak > 0 && <Text style={styles.streak}>🔥 {habit.streak}</Text>}
+        <Text style={styles.chevron}>›</Text>
       </View>
     </TouchableOpacity>
   );
 }
 
 export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
-  const [part, setPart] = useState('today');
+  const [showAdd, setShowAdd] = useState(false);
   const [newHabit, setNewHabit] = useState('');
   const [openId, setOpenId] = useState(null); // which habit's analytics are open
   const today = todayKey();
 
-  // Open where the user left off last time.
-  useEffect(() => {
-    AsyncStorage.getItem(SUBTAB_KEY)
-      .then((v) => { if (v && PARTS.some((p) => p.id === v)) setPart(v); })
-      .catch(() => {});
-  }, []);
-  function choosePart(id) {
-    setPart(id);
-    AsyncStorage.setItem(SUBTAB_KEY, id).catch(() => {});
-  }
-
   const doneCount = habits.filter((h) => h.lastDone === today).length;
   const total = habits.length;
   const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
-
-  // The progress bar glides to its new width instead of jumping.
-  const barAnim = useRef(new Animated.Value(percent)).current;
-  useEffect(() => {
-    Animated.timing(barAnim, {
-      toValue: percent, duration: 500,
-      easing: Easing.out(Easing.cubic), useNativeDriver: false, // width can't use native driver
-    }).start();
-  }, [percent]);
+  const topStreak = Math.max(0, ...habits.map((h) => currentStreak(new Set(h.history || []))));
 
   function onAdd() {
     const name = newHabit.trim();
     if (!name) return;
     addHabit(name);
     setNewHabit('');
-    choosePart('today'); // straight back to the list, new habit ready to tick
+    setShowAdd(false);
   }
 
   function onLongPress(habit) {
@@ -128,95 +113,72 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader title="Habits" subtitle="Small things, done daily" />
 
-      <View style={styles.body}>
-        {/* --- Left rail --- */}
-        <View style={styles.rail}>
-          {PARTS.map((p) => (
-            <TouchableOpacity
-              key={p.id}
-              style={[styles.railBtn, part === p.id && styles.railBtnOn]}
-              onPress={() => choosePart(p.id)}
-            >
-              <Text style={[styles.railText, part === p.id && styles.railTextOn]}>
-                {p.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+        {/* --- The ring --- */}
+        <View style={styles.ringCard}>
+          <ProgressRing percent={percent} size={96} stroke={10}>
+            <Text style={styles.ringPct}>{percent}%</Text>
+          </ProgressRing>
+          <View style={{ flex: 1, marginLeft: 18 }}>
+            <Text style={styles.ringTitle}>Today</Text>
+            <Text style={styles.ringMeta}>
+              {total === 0
+                ? 'Nothing tracked yet.'
+                : <Text><Text style={styles.ringStrong}>{doneCount} of {total}</Text> done{topStreak > 1 ? ` · ${topStreak}-day streak` : ''}</Text>}
+            </Text>
+            {total > 0 && doneCount === total && (
+              <Text style={styles.ringDone}>All done. Quietly excellent.</Text>
+            )}
+          </View>
         </View>
 
-        {/* --- Content --- */}
-        <View style={styles.content}>
-          {part === 'today' && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-              <View style={styles.summary}>
-                <Text style={styles.summaryBig}>
-                  {doneCount}<Text style={styles.summaryDim}> / {total}</Text>
-                </Text>
-                <View style={styles.barTrack}>
-                  <Animated.View style={[styles.barFill, {
-                    width: barAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
-                  }]} />
-                </View>
-              </View>
-              {habits.length === 0 && (
-                <Text style={styles.empty}>No habits yet — add your first from the rail.</Text>
-              )}
-              {habits.map((h) => (
-                <HabitRow
-                  key={h.id}
-                  habit={h}
-                  today={today}
-                  onToggle={() => toggleHabit(h.id)}
-                  onLongPress={() => onLongPress(h)}
-                />
-              ))}
-            </ScrollView>
-          )}
+        {/* --- The habits --- */}
+        {habits.length === 0 ? (
+          <Text style={styles.empty}>
+            No habits yet. Tap ＋ and start with something small —{'\n'}"Read 10 pages" beats "Read more".
+          </Text>
+        ) : (
+          <Text style={styles.hint}>Tick the box · tap a habit for its story · hold to delete.</Text>
+        )}
+        {habits.map((h) => (
+          <HabitRow
+            key={h.id}
+            habit={h}
+            today={today}
+            onToggle={() => toggleHabit(h.id)}
+            onOpen={() => setOpenId(h.id)}
+            onLongPress={() => onLongPress(h)}
+          />
+        ))}
+      </ScrollView>
 
-          {part === 'tracker' && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-              <Text style={styles.hint}>Last 7 days — tap a habit for the full picture.</Text>
-              {habits.length === 0 && (
-                <Text style={styles.empty}>Nothing to track yet.</Text>
-              )}
-              {habits.map((h) => (
-                <TrackerRow
-                  key={h.id}
-                  habit={h}
-                  today={today}
-                  onOpen={() => setOpenId(h.id)}
-                  onLongPress={() => onLongPress(h)}
-                />
-              ))}
-            </ScrollView>
-          )}
+      <FAB onPress={() => { setNewHabit(''); setShowAdd(true); }} />
 
-          {part === 'add' && (
-            <View>
-              <Text style={styles.hint}>
-                Small and specific beats big and vague —{'\n'}"Read 10 pages" over "Read more".
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Drink 2L of water…"
-                placeholderTextColor={COLORS.muted2}
-                value={newHabit}
-                onChangeText={setNewHabit}
-                onSubmitEditing={onAdd}
-                returnKeyType="done"
-                autoFocus
-              />
-              <TouchableOpacity
-                style={[styles.primaryBtn, !newHabit.trim() && { opacity: 0.4 }]}
-                onPress={onAdd}
-                disabled={!newHabit.trim()}
-              >
-                <Text style={styles.primaryBtnText}>Add habit</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+      {/* ================= Add pop-up ================= */}
+      <ModalShell visible={showAdd} onClose={() => setShowAdd(false)} title="New habit">
+        <View>
+          <Text style={styles.addHint}>
+            Small and specific beats big and vague — "Drink 2L of water" over "Be healthier".
+          </Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Drink 2L of water…"
+            placeholderTextColor={COLORS.muted2}
+            value={newHabit}
+            onChangeText={setNewHabit}
+            onSubmitEditing={onAdd}
+            returnKeyType="done"
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.primaryBtn, !newHabit.trim() && { opacity: 0.4 }]}
+            onPress={onAdd}
+            disabled={!newHabit.trim()}
+          >
+            <Text style={styles.primaryBtnText}>Add habit</Text>
+          </TouchableOpacity>
         </View>
-      </View>
+      </ModalShell>
 
       {/* ================= Analytics pop-up ================= */}
       <ModalShell
@@ -258,35 +220,49 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
-  body: { flex: 1, flexDirection: 'row', gap: 12 },
-
-  rail: { width: 86, gap: 8 },
-  railBtn: {
+  ringCard: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
-    borderRadius: 12, paddingVertical: 13, alignItems: 'center',
+    borderRadius: 18, padding: 18, marginBottom: 16,
   },
-  railBtnOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
-  railText: { color: COLORS.muted, fontSize: 13.5, fontWeight: '600' },
-  railTextOn: { color: COLORS.bg, fontWeight: '700' },
+  ringPct: { color: COLORS.ink, fontSize: 19, fontWeight: '700', fontFamily: SERIF },
+  ringTitle: { color: COLORS.ink, fontSize: 18, fontWeight: '600', fontFamily: SERIF },
+  ringMeta: { color: COLORS.muted, fontSize: 14.5, marginTop: 4 },
+  ringStrong: { color: COLORS.espressoLight, fontWeight: '700' },
+  ringDone: { color: COLORS.espresso, fontSize: 13, fontWeight: '700', marginTop: 6 },
 
-  content: { flex: 1 },
+  hint: { color: COLORS.muted2, fontSize: 12.5, marginBottom: 10 },
+  empty: { color: COLORS.muted, fontSize: 14.5, lineHeight: 21, textAlign: 'center', marginTop: 30 },
 
-  summary: {
-    backgroundColor: COLORS.panel, borderRadius: 14, borderWidth: 1,
-    borderColor: COLORS.line, padding: 14, marginBottom: 12,
+  row: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel,
+    borderWidth: 1, borderColor: COLORS.line, borderRadius: 14,
+    paddingVertical: 13, paddingHorizontal: 14, marginBottom: 10,
   },
-  summaryBig: { color: COLORS.ink, fontSize: 20, fontWeight: '700' },
-  summaryDim: { color: COLORS.muted, fontSize: 15, fontWeight: '500' },
-  barTrack: {
-    height: 7, borderRadius: 7, backgroundColor: 'rgba(59,44,30,0.08)',
-    marginTop: 10, overflow: 'hidden',
+  check: {
+    width: 26, height: 26, borderRadius: 9, borderWidth: 2,
+    borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center',
   },
-  barFill: { height: 7, borderRadius: 7, backgroundColor: COLORS.espresso },
+  checkOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  checkMark: { color: COLORS.bg, fontSize: 15, fontWeight: '700' },
+  habitName: { color: COLORS.ink, fontSize: 15.5, fontWeight: '600' },
+  habitNameDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
 
-  hint: { color: COLORS.muted, fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  weekStrip: { flexDirection: 'row', gap: 4, marginTop: 7 },
+  weekCell: {
+    width: 15, height: 9, borderRadius: 3,
+    backgroundColor: 'rgba(59,44,30,0.07)',
+    borderWidth: 1, borderColor: COLORS.line,
+  },
+  weekCellOn: { backgroundColor: COLORS.espressoLight, borderColor: COLORS.espressoLight },
 
+  rowRight: { alignItems: 'flex-end', marginLeft: 10, flexDirection: 'row', gap: 8 },
+  streak: { color: COLORS.espressoLight, fontSize: 13.5, fontWeight: '600' },
+  chevron: { color: COLORS.muted2, fontSize: 17, marginTop: -1 },
+
+  addHint: { color: COLORS.muted, fontSize: 13.5, lineHeight: 19, marginBottom: 12 },
   input: {
-    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
     color: COLORS.ink, fontSize: 16, marginBottom: 12,
   },
@@ -296,30 +272,6 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: COLORS.bg, fontSize: 15.5, fontWeight: '700' },
 
-  row: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel,
-    borderWidth: 1, borderColor: COLORS.line, borderRadius: 14,
-    paddingVertical: 14, paddingHorizontal: 14, marginBottom: 10,
-  },
-  check: {
-    width: 24, height: 24, borderRadius: 8, borderWidth: 2,
-    borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center',
-    marginRight: 12,
-  },
-  checkOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
-  checkMark: { color: COLORS.bg, fontSize: 14, fontWeight: '700' },
-  habitName: { color: COLORS.ink, fontSize: 15.5, flex: 1 },
-  habitNameDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
-  streak: { color: COLORS.espressoLight, fontSize: 13.5, fontWeight: '600' },
-
-  weekStrip: { flexDirection: 'row', gap: 4, marginLeft: 8 },
-  weekCell: {
-    width: 13, height: 20, borderRadius: 4,
-    backgroundColor: 'rgba(59,44,30,0.07)',
-    borderWidth: 1, borderColor: COLORS.line,
-  },
-  weekCellOn: { backgroundColor: COLORS.espressoLight, borderColor: COLORS.espressoLight },
-
   statRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   stat: {
     flex: 1, backgroundColor: COLORS.panelDeep, borderRadius: 12,
@@ -328,6 +280,4 @@ const styles = StyleSheet.create({
   },
   statNum: { color: COLORS.ink, fontSize: 20, fontWeight: '700', fontFamily: SERIF },
   statLabel: { color: COLORS.muted2, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 3 },
-
-  empty: { color: COLORS.muted, fontSize: 14, lineHeight: 20 },
 });
