@@ -206,6 +206,30 @@ export function currentStreak(daySet) {
   return n;
 }
 
+// Monday of the week containing `key` (the app is Monday-first).
+export function weekStartKey(key) {
+  return addDays(key, -weekdayIndex(key));
+}
+
+// How many days in the week starting `weekStart` are in the set.
+export function countInWeek(daySet, weekStart) {
+  let n = 0;
+  for (let i = 0; i < 7; i++) if (daySet.has(addDays(weekStart, i))) n++;
+  return n;
+}
+
+// For "3×/week"-style habits: consecutive weeks the target was hit.
+// The current week counts once hit; until then it just doesn't break
+// the run (the week isn't over yet).
+export function weekStreak(daySet, target, today = todayKey()) {
+  let ws = weekStartKey(today);
+  let n = 0;
+  if (countInWeek(daySet, ws) >= target) n++;
+  ws = addDays(ws, -7);
+  while (countInWeek(daySet, ws) >= target) { n++; ws = addDays(ws, -7); }
+  return n;
+}
+
 // The longest run of consecutive days anywhere in history.
 export function bestStreak(daySet) {
   let best = 0;

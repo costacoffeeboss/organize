@@ -8,13 +8,13 @@
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SERIF } from '../theme';
 import {
   todayKey, monthLabel, shortDate, monthCells, repeatOccursOn,
-  reminderOccursOn,
+  reminderOccursOn, weekStartKey, addDays, parseKey, WEEKDAY_LETTERS,
 } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import TodoRow from '../components/TodoRow';
@@ -35,6 +35,11 @@ export default function CalendarScreen({
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth()); // 0-based
   const [selected, setSelected] = useState(today);
+
+  // --- Expanded, full-screen calendar ---
+  const [expanded, setExpanded] = useState(false);
+  const [expMode, setExpMode] = useState('month'); // 'month' | 'week'
+  const [weekAnchor, setWeekAnchor] = useState(today);
 
   // --- Add pop-up state ---
   const [showAdd, setShowAdd] = useState(false);
@@ -86,6 +91,23 @@ export default function CalendarScreen({
     return reminders.filter((r) => reminderOccursOn(r, key));
   }
 
+  // Everything on a day, in ribbon order: events, reminders, to-dos.
+  function itemsOn(key) {
+    return [
+      ...eventsOn(key).map((e) => ({ id: `e${e.id}`, kind: 'event', title: e.title, time: e.time })),
+      ...remindersOn(key).map((r) => ({ id: `r${r.id}`, kind: 'reminder', title: r.title })),
+      ...todosOn(key).map((t) => ({ id: `t${t.id}`, kind: 'todo', title: t.title })),
+    ];
+  }
+
+  function pickDayAndClose(key) {
+    setSelected(key);
+    const d = parseKey(key);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+    setExpanded(false);
+  }
+
   // Dots for the visible month only (cheap: ~31 days each render).
   const dots = {};
   monthCells(year, month).forEach((cell) => {
@@ -122,7 +144,15 @@ export default function CalendarScreen({
             <TouchableOpacity onPress={prevMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.navArrow}>‹</Text>
             </TouchableOpacity>
-            <Text style={styles.monthTitle}>{monthLabel(year, month)}</Text>
+            {/* tap the title to open the big calendar */}
+            <TouchableOpacity
+              onPress={() => { setWeekAnchor(selected); setExpanded(true); }}
+              hitSlop={{ top: 8, bottom: 8, left: 20, right: 20 }}
+              style={styles.monthTitleBtn}
+            >
+              <Text style={styles.monthTitle}>{monthLabel(year, month)}</Text>
+              <Text style={styles.expandGlyph}>⤢</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={nextMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.navArrow}>›</Text>
             </TouchableOpacity>
@@ -320,6 +350,148 @@ export default function CalendarScreen({
           </View>
         )}
       </ModalShell>
+
+      {/* ================= Expanded calendar ================= */}
+      <Modal visible={expanded} animationType="slide" onRequestClose={() => setExpanded(false)}>
+        <SafeAreaView style={styles.expSafe} edges={['top', 'bottom']}>
+          {/* header: close · title · mode switch */}
+          <View style={styles.expHead}>
+            <TouchableOpacity
+              onPress={() => setExpanded(false)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.expClose}>✕</Text>
+            </TouchableOpacity>
+            <View style={styles.expNav}>
+              <TouchableOpacity
+                onPress={() => expMode === 'month' ? prevMonth() : setWeekAnchor(addDays(weekAnchor, -7))}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.navArrow}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.expTitle}>
+                {expMode === 'month'
+                  ? monthLabel(year, month)
+                  : `Week of ${shortDate(weekStartKey(weekAnchor))}`}
+              </Text>
+              <TouchableOpacity
+                onPress={() => expMode === 'month' ? nextMonth() : setWeekAnchor(addDays(weekAnchor, 7))}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.navArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.expSegment}>
+              {[['month', 'M'], ['week', 'W']].map(([id, label]) => (
+                <TouchableOpacity
+                  key={id}
+                  style={[styles.expSegBtn, expMode === id && styles.expSegOn]}
+                  onPress={() => setExpMode(id)}
+                >
+                  <Text style={[styles.expSegText, expMode === id && styles.expSegTextOn]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {expMode === 'month' ? (
+            <View style={styles.bigGrid}>
+              {/* weekday letters */}
+              <View style={styles.bigWeekHead}>
+                {WEEKDAY_LETTERS.map((w, i) => (
+                  <Text key={i} style={styles.bigWeekday}>{w}</Text>
+                ))}
+              </View>
+              {/* the month, one flex row per week — each day carries
+                  its ribbons underneath the number, calendar-app style */}
+              {(() => {
+                const cells = monthCells(year, month);
+                const weeks = [];
+                for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+                return weeks.map((week, wi) => (
+                  <View key={wi} style={styles.bigRow}>
+                    {week.map((cell, ci) => {
+                      if (!cell) return <View key={ci} style={styles.bigCell} />;
+                      const items = itemsOn(cell.key);
+                      const isToday = cell.key === today;
+                      return (
+                        <TouchableOpacity
+                          key={ci}
+                          style={[styles.bigCell, cell.key === selected && styles.bigCellSel]}
+                          onPress={() => pickDayAndClose(cell.key)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.bigDayNum, isToday && styles.bigDayToday]}>
+                            {cell.day}
+                          </Text>
+                          {items.slice(0, 3).map((it) => (
+                            <View key={it.id} style={[
+                              styles.ribbon,
+                              it.kind === 'event' && styles.ribbonEvent,
+                              it.kind === 'reminder' && styles.ribbonReminder,
+                              it.kind === 'todo' && styles.ribbonTodo,
+                            ]}>
+                              <Text
+                                style={[styles.ribbonText, it.kind === 'todo' && styles.ribbonTextTodo]}
+                                numberOfLines={1}
+                              >
+                                {it.title}
+                              </Text>
+                            </View>
+                          ))}
+                          {items.length > 3 && (
+                            <Text style={styles.moreText}>+{items.length - 3}</Text>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ));
+              })()}
+            </View>
+          ) : (
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+              {Array.from({ length: 7 }, (_, i) => addDays(weekStartKey(weekAnchor), i)).map((k) => {
+                const items = itemsOn(k);
+                const isToday = k === today;
+                return (
+                  <TouchableOpacity
+                    key={k}
+                    style={[styles.wkRow, isToday && styles.wkRowToday]}
+                    onPress={() => pickDayAndClose(k)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.wkDayCol}>
+                      <Text style={[styles.wkDayName, isToday && styles.wkTodayText]}>
+                        {shortDate(k).split(' ')[0]}
+                      </Text>
+                      <Text style={[styles.wkDayNum, isToday && styles.wkTodayText]}>
+                        {parseKey(k).getDate()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      {items.length === 0 && <Text style={styles.wkEmpty}>—</Text>}
+                      {items.map((it) => (
+                        <View key={it.id} style={styles.wkItem}>
+                          <View style={[styles.itemDot, {
+                            backgroundColor: it.kind === 'event' ? COLORS.espresso
+                              : it.kind === 'reminder' ? COLORS.gold : COLORS.muted2,
+                          }]} />
+                          <Text style={styles.wkItemText} numberOfLines={1}>{it.title}</Text>
+                          {it.time && <Text style={styles.wkTime}>{it.time}</Text>}
+                        </View>
+                      ))}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              <Text style={styles.wkHint}>Tap a day to jump back to it.</Text>
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -335,7 +507,72 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 8,
   },
   monthTitle: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF },
+  monthTitleBtn: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  expandGlyph: { color: COLORS.muted2, fontSize: 13, marginTop: 1 },
   navArrow: { color: COLORS.espressoLight, fontSize: 28, paddingHorizontal: 10, marginTop: -4 },
+
+  // --- expanded calendar ---
+  expSafe: { flex: 1, backgroundColor: COLORS.bg },
+  expHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10,
+    borderBottomWidth: 1, borderBottomColor: COLORS.line,
+  },
+  expClose: { color: COLORS.muted, fontSize: 17, fontWeight: '600', padding: 4 },
+  expNav: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  expTitle: {
+    color: COLORS.ink, fontSize: 16.5, fontWeight: '600', fontFamily: SERIF,
+    minWidth: 150, textAlign: 'center',
+  },
+  expSegment: {
+    flexDirection: 'row', backgroundColor: COLORS.panelDeep,
+    borderRadius: 10, padding: 3, borderWidth: 1, borderColor: COLORS.line,
+  },
+  expSegBtn: { paddingVertical: 5, paddingHorizontal: 11, borderRadius: 7 },
+  expSegOn: { backgroundColor: COLORS.espresso },
+  expSegText: { color: COLORS.muted, fontSize: 13, fontWeight: '700' },
+  expSegTextOn: { color: COLORS.bg },
+
+  bigGrid: { flex: 1, paddingHorizontal: 4, paddingBottom: 6 },
+  bigWeekHead: { flexDirection: 'row', paddingVertical: 7 },
+  bigWeekday: {
+    flex: 1, textAlign: 'center', color: COLORS.muted2,
+    fontSize: 11, fontWeight: '600', letterSpacing: 1,
+  },
+  bigRow: { flex: 1, flexDirection: 'row' },
+  bigCell: {
+    flex: 1, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.lineStrong,
+    paddingTop: 4, paddingHorizontal: 2, overflow: 'hidden',
+  },
+  bigCellSel: { backgroundColor: 'rgba(75,54,38,0.07)', borderRadius: 8 },
+  bigDayNum: {
+    color: COLORS.ink, fontSize: 12.5, fontWeight: '600',
+    textAlign: 'center', marginBottom: 3,
+  },
+  bigDayToday: { color: COLORS.espresso, fontWeight: '800' },
+  ribbon: { borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, marginBottom: 2 },
+  ribbonEvent: { backgroundColor: COLORS.espresso },
+  ribbonReminder: { backgroundColor: COLORS.gold },
+  ribbonTodo: { backgroundColor: 'rgba(59,44,30,0.08)', borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.lineStrong },
+  ribbonText: { color: COLORS.bg, fontSize: 8.5, fontWeight: '700' },
+  ribbonTextTodo: { color: COLORS.muted },
+  moreText: { color: COLORS.muted2, fontSize: 9, fontWeight: '700', textAlign: 'center' },
+
+  wkRow: {
+    flexDirection: 'row', gap: 14,
+    paddingVertical: 14, paddingHorizontal: 18,
+    borderBottomWidth: 1, borderBottomColor: COLORS.line,
+  },
+  wkRowToday: { backgroundColor: 'rgba(75,54,38,0.05)' },
+  wkDayCol: { width: 46, alignItems: 'center' },
+  wkDayName: { color: COLORS.muted2, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  wkDayNum: { color: COLORS.ink, fontSize: 21, fontWeight: '600', fontFamily: SERIF, marginTop: 1 },
+  wkTodayText: { color: COLORS.espresso },
+  wkItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3.5 },
+  wkItemText: { color: COLORS.ink, fontSize: 14.5, flex: 1 },
+  wkTime: { color: COLORS.espressoLight, fontSize: 12.5, fontWeight: '600', marginLeft: 8 },
+  wkEmpty: { color: COLORS.muted2, fontSize: 14, marginTop: 8 },
+  wkHint: { color: COLORS.muted2, fontSize: 12.5, textAlign: 'center', paddingVertical: 18 },
 
   dayTitle: {
     color: COLORS.ink, fontSize: 17, fontWeight: '600',

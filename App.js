@@ -24,13 +24,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from './theme';
 import {
   todayKey, addDays, parseKey, weekdayIndex,
-  nextOccurrence, currentStreak,
+  nextOccurrence, currentStreak, weekStreak,
 } from './utils/dates';
 import HomeScreen from './screens/HomeScreen';
 import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import HabitsScreen from './screens/HabitsScreen';
 import JournalScreen from './screens/JournalScreen';
+import GoalsScreen from './screens/GoalsScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 
 // Storage keys. (Habits keep the old "atomic" key so nothing is lost.)
@@ -40,6 +41,8 @@ const TODOS_KEY = '@organize_todos_v2';
 const EVENTS_KEY = '@organize_events_v1';
 const REMINDERS_KEY = '@organize_reminders_v1';
 const JOURNAL_KEY = '@organize_journal_v1';
+const GOALS_KEY = '@organize_goals_v1';
+const STEPS_KEY = '@organize_steps_v1'; // journal's "one step at a time" entries
 const WELCOME_KEY = '@organize_welcomed_v1';
 const NAME_KEY = '@organize_name';
 
@@ -87,10 +90,21 @@ function migrateTodosV1(old) {
 
 // Old habits only remembered `lastDone`; now `history` (every completed
 // day) is the source of truth and the streak is computed from it.
+// `target` (days per week, 1–7) arrived later — older habits are daily.
 function migrateHabit(h) {
-  if (h.history) return h;
-  const history = h.lastDone ? [h.lastDone] : [];
-  return { ...h, history, streak: currentStreak(new Set(history)) };
+  let out = h;
+  if (!out.history) {
+    const history = out.lastDone ? [out.lastDone] : [];
+    out = { ...out, history, streak: currentStreak(new Set(history)) };
+  }
+  if (!out.target) out = { ...out, target: 7 };
+  return out;
+}
+
+// The flame means: consecutive days for daily habits, consecutive
+// weeks the target was hit for "n×/week" habits.
+function habitStreak(daySet, target) {
+  return target < 7 ? weekStreak(daySet, target) : currentStreak(daySet);
 }
 
 export default function App() {
@@ -99,6 +113,8 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [reminders, setReminders] = useState([]);
   const [journal, setJournal] = useState({});
+  const [goals, setGoals] = useState([]);
+  const [steps, setSteps] = useState({});
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
   const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
@@ -110,7 +126,7 @@ export default function App() {
       try {
         const pairs = await AsyncStorage.multiGet([
           HABITS_KEY, TODOS_KEY, TODOS_V1_KEY, EVENTS_KEY, REMINDERS_KEY, JOURNAL_KEY,
-          WELCOME_KEY, NAME_KEY,
+          GOALS_KEY, STEPS_KEY, WELCOME_KEY, NAME_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -129,9 +145,11 @@ export default function App() {
         setEvents(val(3) || []);
         setReminders(val(4) || []);
         setJournal(val(5) || {});
+        setGoals(val(6) || []);
+        setSteps(val(7) || {});
         // Welcome flag + name are plain strings, not JSON.
-        setWelcomed(pairs[6][1] === '1');
-        setName(pairs[7][1] || '');
+        setWelcomed(pairs[8][1] === '1');
+        setName(pairs[9][1] || '');
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -161,12 +179,21 @@ export default function App() {
     if (!loaded) return;
     AsyncStorage.setItem(JOURNAL_KEY, JSON.stringify(journal)).catch(() => {});
   }, [journal, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(GOALS_KEY, JSON.stringify(goals)).catch(() => {});
+  }, [goals, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(STEPS_KEY, JSON.stringify(steps)).catch(() => {});
+  }, [steps, loaded]);
 
   // ================= Habit actions =================
 
-  function addHabit(name) {
+  function addHabit(name, target = 7) {
     setHabits((prev) => [...prev, {
-      id: Date.now().toString(), name, streak: 0, lastDone: null, history: [],
+      id: Date.now().toString(), name, target,
+      streak: 0, lastDone: null, history: [],
     }]);
   }
 
@@ -181,7 +208,7 @@ export default function App() {
         const history = [...days].sort();
         return {
           ...h, history,
-          streak: currentStreak(days),
+          streak: habitStreak(days, h.target || 7),
           lastDone: history[history.length - 1] || null,
         };
       })
@@ -263,6 +290,55 @@ export default function App() {
     });
   }
 
+  // "One step at a time" entries — the journal's goals side.
+  function saveStep(key, text) {
+    setSteps((prev) => ({ ...prev, [key]: { text } }));
+  }
+  function deleteStep(key) {
+    setSteps((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  // ================= Goal actions =================
+
+  // goal = { title, specific, why, milestones: [text], targetDate }
+  function addGoal({ title, specific, why, milestones, targetDate }) {
+    setGoals((prev) => [...prev, {
+      id: Date.now().toString(), title,
+      specific: specific || '', why: why || '',
+      milestones: milestones.map((text, i) => ({
+        id: `${Date.now()}-${i}`, text, done: false,
+      })),
+      targetDate: targetDate || null,
+      createdOn: todayKey(), achievedOn: null,
+    }]);
+  }
+
+  function toggleMilestone(goalId, milestoneId) {
+    setGoals((prev) => prev.map((g) => {
+      if (g.id !== goalId) return g;
+      return {
+        ...g,
+        milestones: g.milestones.map((m) =>
+          m.id === milestoneId ? { ...m, done: !m.done } : m
+        ),
+      };
+    }));
+  }
+
+  function markGoalAchieved(goalId) {
+    setGoals((prev) => prev.map((g) =>
+      g.id === goalId ? { ...g, achievedOn: g.achievedOn ? null : todayKey() } : g
+    ));
+  }
+
+  function deleteGoal(goalId) {
+    setGoals((prev) => prev.filter((g) => g.id !== goalId));
+  }
+
   // ================= Welcome =================
 
   function finishWelcome(chosenName) {
@@ -279,6 +355,7 @@ export default function App() {
     'To-dos': 'checkbox-outline',
     'Calendar': 'calendar-outline',
     'Habits': 'flame-outline',
+    'Goals': 'flag-outline',
     'Journal': 'book-outline',
   };
 
@@ -363,12 +440,27 @@ export default function App() {
               />
             )}
           </Tab.Screen>
+          <Tab.Screen name="Goals">
+            {() => (
+              <GoalsScreen
+                goals={goals}
+                addGoal={addGoal}
+                toggleMilestone={toggleMilestone}
+                markGoalAchieved={markGoalAchieved}
+                deleteGoal={deleteGoal}
+              />
+            )}
+          </Tab.Screen>
           <Tab.Screen name="Journal">
             {() => (
               <JournalScreen
                 journal={journal}
                 saveEntry={saveEntry}
                 deleteEntry={deleteEntry}
+                steps={steps}
+                saveStep={saveStep}
+                deleteStep={deleteStep}
+                goals={goals}
                 journalSeed={journalSeed}
                 onSeedConsumed={() => setJournalSeed(null)}
               />

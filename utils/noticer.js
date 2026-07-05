@@ -62,12 +62,16 @@ export function getNotices({ habits, todos, journal, today = todayKey() }) {
   habits.forEach((h) => {
     const days = new Set(h.history || []);
     if (days.size === 0) return;
+    const weekly = h.target && h.target < 7; // e.g. 3×/week
     const last = (h.history || [])[h.history.length - 1];
     const gap = diffDays(last, today);
     const best = bestStreak(days);
-    const streak = currentStreak(days);
+    const streak = h.streak || 0;
+    // A 2×/week habit isn't "lapsed" after 3 quiet days — give weekly
+    // habits a full week's grace before saying anything.
+    const lapseAfter = weekly ? 8 : 3;
 
-    if (gap >= 3 && days.size >= 3) {
+    if (gap >= lapseAfter && days.size >= 3) {
       add(2, 'habit_lapsed', h.id,
         pick([
           `“${h.name}” has slipped for ${gap} days — your best run was ${best} in a row.`,
@@ -77,9 +81,13 @@ export function getNotices({ habits, todos, journal, today = todayKey() }) {
           `What usually gets in the way of ${h.name.toLowerCase()}?`,
           `What would make ${h.name.toLowerCase()} easier to restart tomorrow?`,
         ], `q${h.id}${today}`));
-    } else if ([7, 14, 21, 30].includes(streak)) {
+    } else if (!weekly && [7, 14, 21, 30].includes(streak)) {
       add(7, 'habit_strong', h.id,
         `${streak} days straight of “${h.name}”. Quietly impressive.`,
+        'What has changed now that this is becoming automatic?');
+    } else if (weekly && [4, 8, 12].includes(streak)) {
+      add(7, 'habit_strong', h.id,
+        `${streak} weeks running you've hit your target for “${h.name}”.`,
         'What has changed now that this is becoming automatic?');
     }
   });

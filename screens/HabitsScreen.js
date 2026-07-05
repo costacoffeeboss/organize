@@ -11,12 +11,15 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Animated,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Animated, Easing,
   Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SERIF } from '../theme';
-import { todayKey, addDays, currentStreak, bestStreak } from '../utils/dates';
+import {
+  todayKey, addDays, currentStreak, bestStreak, weekStartKey, countInWeek,
+  WEEKDAY_LETTERS,
+} from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
 import ModalShell from '../components/ModalShell';
@@ -24,12 +27,20 @@ import ProgressRing from '../components/ProgressRing';
 import FAB from '../components/FAB';
 
 // One habit: check to tick, tap for analytics, hold to delete.
-// Module-level so the tick-pop animation survives parent re-renders.
+// The strip shows THIS week (Mon–Sun) against the habit's weekly
+// target; hitting the target plays a small celebration on the row.
+// Module-level so animations survive parent re-renders.
 function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
   const done = habit.lastDone === today;
   const days = new Set(habit.history || []);
-  const week = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+  const target = habit.target || 7;
+  const weekly = target < 7;
+  const ws = weekStartKey(today);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const weekCount = countInWeek(days, ws);
+  const weekHit = weekCount >= target;
 
+  // Tick pop
   const pop = useRef(new Animated.Value(1)).current;
   const wasDone = useRef(done);
   useEffect(() => {
@@ -42,56 +53,108 @@ function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
     wasDone.current = done;
   }, [done]);
 
+  // Week-complete celebration: the tick that reaches the target makes
+  // the row swell, glow crema, and a "Week complete" ribbon springs in
+  // before settling back down. Bigger than a pop, smaller than a popup.
+  const flash = useRef(new Animated.Value(0)).current;
+  const prevCount = useRef(weekCount);
+  useEffect(() => {
+    if (weekCount >= target && prevCount.current === target - 1) {
+      Animated.sequence([
+        Animated.spring(flash, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
+        Animated.delay(1500),
+        Animated.timing(flash, {
+          toValue: 0, duration: 550, easing: Easing.in(Easing.quad), useNativeDriver: true,
+        }),
+      ]).start();
+    }
+    prevCount.current = weekCount;
+  }, [weekCount]);
+
   return (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={onOpen}
-      onLongPress={onLongPress}
-      activeOpacity={0.8}
-    >
+    <Animated.View style={{
+      transform: [{ scale: flash.interpolate({ inputRange: [0, 1], outputRange: [1, 1.035] }) }],
+    }}>
       <TouchableOpacity
-        onPress={onToggle}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
+        style={styles.row}
+        onPress={onOpen}
+        onLongPress={onLongPress}
+        activeOpacity={0.8}
       >
-        <Animated.View style={[styles.check, done && styles.checkOn, { transform: [{ scale: pop }] }]}>
-          {done && <Text style={styles.checkMark}>✓</Text>}
+        {/* celebration glow */}
+        <Animated.View pointerEvents="none" style={[styles.celebration, {
+          opacity: flash.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }),
+        }]} />
+        {/* celebration ribbon */}
+        <Animated.View pointerEvents="none" style={[styles.ribbon, {
+          opacity: flash,
+          transform: [{ translateY: flash.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+        }]}>
+          <Text style={styles.ribbonText}>✦ Week complete</Text>
         </Animated.View>
-      </TouchableOpacity>
 
-      <View style={{ flex: 1, marginLeft: 13 }}>
-        <Text style={[styles.habitName, done && styles.habitNameDone]} numberOfLines={1}>
-          {habit.name}
-        </Text>
-        <View style={styles.weekStrip}>
-          {week.map((k) => (
-            <View key={k} style={[styles.weekCell, days.has(k) && styles.weekCellOn]} />
-          ))}
+        <TouchableOpacity
+          onPress={onToggle}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
+        >
+          <Animated.View style={[styles.check, done && styles.checkOn, { transform: [{ scale: pop }] }]}>
+            {done && <Text style={styles.checkMark}>✓</Text>}
+          </Animated.View>
+        </TouchableOpacity>
+
+        <View style={{ flex: 1, marginLeft: 13 }}>
+          <Text style={[styles.habitName, done && styles.habitNameDone]} numberOfLines={1}>
+            {habit.name}
+          </Text>
+          <View style={styles.weekWrap}>
+            <View style={styles.weekStrip}>
+              {week.map((k, i) => (
+                <View key={k} style={[
+                  styles.weekCell,
+                  days.has(k) && (weekHit ? styles.weekCellHit : styles.weekCellOn),
+                  k > today && styles.weekCellFuture,
+                  k === today && styles.weekCellToday,
+                ]} />
+              ))}
+            </View>
+            {weekly && (
+              weekHit
+                ? <Text style={styles.weekHitTag}>✓ {weekCount}/{target}</Text>
+                : <Text style={styles.weekCountTag}>{weekCount}/{target}</Text>
+            )}
+          </View>
         </View>
-      </View>
 
-      <View style={styles.rowRight}>
-        {habit.streak > 0 && <Text style={styles.streak}>🔥 {habit.streak}</Text>}
-        <Text style={styles.chevron}>›</Text>
-      </View>
-    </TouchableOpacity>
+        <View style={styles.rowRight}>
+          {habit.streak > 0 && (
+            <Text style={styles.streak}>🔥 {habit.streak}{weekly ? 'w' : ''}</Text>
+          )}
+          <Text style={styles.chevron}>›</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newHabit, setNewHabit] = useState('');
+  const [newTarget, setNewTarget] = useState(7); // times per week
   const [openId, setOpenId] = useState(null); // which habit's analytics are open
   const today = todayKey();
 
   const doneCount = habits.filter((h) => h.lastDone === today).length;
   const total = habits.length;
   const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
-  const topStreak = Math.max(0, ...habits.map((h) => currentStreak(new Set(h.history || []))));
+  // The headline streak is the best DAY streak among daily habits.
+  const topStreak = Math.max(0, ...habits
+    .filter((h) => (h.target || 7) === 7)
+    .map((h) => h.streak || 0));
 
   function onAdd() {
     const name = newHabit.trim();
     if (!name) return;
-    addHabit(name);
+    addHabit(name, newTarget);
     setNewHabit('');
     setShowAdd(false);
   }
@@ -152,7 +215,7 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
         ))}
       </ScrollView>
 
-      <FAB onPress={() => { setNewHabit(''); setShowAdd(true); }} />
+      <FAB onPress={() => { setNewHabit(''); setNewTarget(7); setShowAdd(true); }} />
 
       {/* ================= Add pop-up ================= */}
       <ModalShell visible={showAdd} onClose={() => setShowAdd(false)} title="New habit">
@@ -170,6 +233,25 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
             returnKeyType="done"
             autoFocus
           />
+
+          <Text style={styles.targetLabel}>How many days a week?</Text>
+          <View style={styles.targetRow}>
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.targetChip, newTarget === n && styles.targetChipOn]}
+                onPress={() => setNewTarget(n)}
+              >
+                <Text style={[styles.targetChipText, newTarget === n && styles.targetChipTextOn]}>
+                  {n}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.targetHint}>
+            {newTarget === 7 ? 'Every day — streak counts days.' : `${newTarget}× a week — streak counts weeks you hit it.`}
+          </Text>
+
           <TouchableOpacity
             style={[styles.primaryBtn, !newHabit.trim() && { opacity: 0.4 }]}
             onPress={onAdd}
@@ -191,9 +273,19 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
             {/* Stat tiles */}
             <View style={styles.statRow}>
               <View style={styles.stat}>
-                <Text style={styles.statNum}>{currentStreak(openDays)}</Text>
-                <Text style={styles.statLabel}>streak</Text>
+                <Text style={styles.statNum}>{open.streak || 0}</Text>
+                <Text style={styles.statLabel}>
+                  {(open.target || 7) < 7 ? 'week streak' : 'streak'}
+                </Text>
               </View>
+              {(open.target || 7) < 7 && (
+                <View style={styles.stat}>
+                  <Text style={styles.statNum}>
+                    {countInWeek(openDays, weekStartKey(today))}/{open.target}
+                  </Text>
+                  <Text style={styles.statLabel}>this week</Text>
+                </View>
+              )}
               <View style={styles.stat}>
                 <Text style={styles.statNum}>{bestStreak(openDays)}</Text>
                 <Text style={styles.statLabel}>best</Text>
@@ -248,13 +340,44 @@ const styles = StyleSheet.create({
   habitName: { color: COLORS.ink, fontSize: 15.5, fontWeight: '600' },
   habitNameDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
 
-  weekStrip: { flexDirection: 'row', gap: 4, marginTop: 7 },
+  weekWrap: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 7 },
+  weekStrip: { flexDirection: 'row', gap: 4 },
   weekCell: {
     width: 15, height: 9, borderRadius: 3,
     backgroundColor: 'rgba(59,44,30,0.07)',
     borderWidth: 1, borderColor: COLORS.line,
   },
   weekCellOn: { backgroundColor: COLORS.espressoLight, borderColor: COLORS.espressoLight },
+  weekCellHit: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  weekCellFuture: { opacity: 0.45 },
+  weekCellToday: { borderColor: COLORS.espressoLight },
+  weekCountTag: { color: COLORS.muted2, fontSize: 11.5, fontWeight: '700' },
+  weekHitTag: { color: COLORS.gold, fontSize: 11.5, fontWeight: '800' },
+
+  celebration: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.crema, borderRadius: 14,
+  },
+  ribbon: {
+    position: 'absolute', top: -10, right: 12, zIndex: 2,
+    backgroundColor: COLORS.espresso, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 4,
+    shadowColor: COLORS.ink, shadowOpacity: 0.25, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 }, elevation: 4,
+  },
+  ribbonText: { color: COLORS.bg, fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3 },
+
+  targetLabel: { color: COLORS.ink, fontSize: 14, fontWeight: '700', marginTop: 10, marginBottom: 8 },
+  targetRow: { flexDirection: 'row', gap: 7 },
+  targetChip: {
+    flex: 1, height: 40, borderRadius: 12, borderWidth: 1,
+    borderColor: COLORS.lineStrong, backgroundColor: COLORS.panel,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  targetChipOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  targetChipText: { color: COLORS.muted, fontSize: 14.5, fontWeight: '700' },
+  targetChipTextOn: { color: COLORS.bg },
+  targetHint: { color: COLORS.muted2, fontSize: 12.5, marginTop: 8, marginBottom: 4 },
 
   rowRight: { alignItems: 'flex-end', marginLeft: 10, flexDirection: 'row', gap: 8 },
   streak: { color: COLORS.espressoLight, fontSize: 13.5, fontWeight: '600' },

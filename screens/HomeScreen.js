@@ -61,7 +61,10 @@ export default function HomeScreen({
   const doneCount = habits.filter((h) => h.lastDone === today).length;
   const total = habits.length;
   const percent = total === 0 ? 0 : Math.round((doneCount / total) * 100);
-  const topStreak = Math.max(0, ...habits.map((h) => currentStreak(new Set(h.history || []))));
+  // Best DAY streak among daily habits (weekly-target habits count weeks).
+  const topStreak = Math.max(0, ...habits
+    .filter((h) => (h.target || 7) === 7)
+    .map((h) => h.streak || 0));
 
   // --- Today's schedule ---
   const dayEvents = events
