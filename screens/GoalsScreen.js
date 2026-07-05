@@ -23,6 +23,7 @@ import ScreenHeader from '../components/ScreenHeader';
 import ModalShell from '../components/ModalShell';
 import CalendarPager from '../components/CalendarPager';
 import GoalQuiz from '../components/GoalQuiz';
+import FullPage from '../components/FullPage';
 import Rise from '../components/Rise';
 import FAB from '../components/FAB';
 
@@ -377,7 +378,7 @@ export default function GoalsScreen({
 
       {/* ============ Full-page editor (create or make-it-SMART) ============ */}
       <Modal visible={editorOpen} animationType="slide" onRequestClose={() => setEditorOpen(false)}>
-        <SafeAreaView style={styles.pageSafe} edges={['top', 'bottom']}>
+        <FullPage>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={styles.pageHead}>
               <TouchableOpacity onPress={() => setEditorOpen(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -497,7 +498,7 @@ export default function GoalsScreen({
               </View>
             )}
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </FullPage>
       </Modal>
     </SafeAreaView>
   );

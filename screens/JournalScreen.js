@@ -15,6 +15,7 @@ import { COLORS, SERIF } from '../theme';
 import { todayKey, niceDate, currentStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
+import FullPage from '../components/FullPage';
 import FAB from '../components/FAB';
 
 export const MOODS = [
@@ -212,7 +213,7 @@ export default function JournalScreen({
         animationType="slide"
         onRequestClose={() => setEditingKey(null)}
       >
-        <SafeAreaView style={styles.pageSafe} edges={['top', 'bottom']}>
+        <FullPage>
           <KeyboardAvoidingView
             style={{ flex: 1 }}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -274,7 +275,7 @@ export default function JournalScreen({
               </TouchableOpacity>
             )}
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </FullPage>
       </Modal>
 
       {/* ============ Full-page step composer (goals side) ============ */}
@@ -283,7 +284,7 @@ export default function JournalScreen({
         animationType="slide"
         onRequestClose={() => setStepKey(null)}
       >
-        <SafeAreaView style={styles.pageSafe} edges={['top', 'bottom']}>
+        <FullPage>
           <KeyboardAvoidingView
             style={{ flex: 1 }}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -336,7 +337,7 @@ export default function JournalScreen({
               </TouchableOpacity>
             )}
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </FullPage>
       </Modal>
     </SafeAreaView>
   );

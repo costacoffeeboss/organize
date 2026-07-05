@@ -8,7 +8,8 @@
 
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert,
+  PanResponder, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SERIF } from '../theme';
@@ -21,6 +22,7 @@ import TodoRow from '../components/TodoRow';
 import MonthGrid from '../components/MonthGrid';
 import ModalShell from '../components/ModalShell';
 import CalendarPager from '../components/CalendarPager';
+import FullPage from '../components/FullPage';
 import FAB from '../components/FAB';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
@@ -107,6 +109,18 @@ export default function CalendarScreen({
     setMonth(d.getMonth());
     setExpanded(false);
   }
+
+  // Swipe up/down on the big month grid to scroll through months,
+  // like a real calendar app. (Created per render so it always sees
+  // the current month — PanResponder closures go stale otherwise.)
+  const monthSwipe = PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) =>
+      Math.abs(g.dy) > 14 && Math.abs(g.dy) > Math.abs(g.dx) * 1.4,
+    onPanResponderRelease: (_, g) => {
+      if (g.dy <= -45) nextMonth();
+      else if (g.dy >= 45) prevMonth();
+    },
+  });
 
   // Dots for the visible month only (cheap: ~31 days each render).
   const dots = {};
@@ -353,7 +367,7 @@ export default function CalendarScreen({
 
       {/* ================= Expanded calendar ================= */}
       <Modal visible={expanded} animationType="slide" onRequestClose={() => setExpanded(false)}>
-        <SafeAreaView style={styles.expSafe} edges={['top', 'bottom']}>
+        <FullPage>
           {/* header: close · title · mode switch */}
           <View style={styles.expHead}>
             <TouchableOpacity
@@ -397,7 +411,7 @@ export default function CalendarScreen({
           </View>
 
           {expMode === 'month' ? (
-            <View style={styles.bigGrid}>
+            <View style={styles.bigGrid} {...monthSwipe.panHandlers}>
               {/* weekday letters */}
               <View style={styles.bigWeekHead}>
                 {WEEKDAY_LETTERS.map((w, i) => (
@@ -452,7 +466,18 @@ export default function CalendarScreen({
               })()}
             </View>
           ) : (
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              alwaysBounceVertical
+              // Pull past the top/bottom to scroll through the weeks.
+              onScrollEndDrag={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                const maxOffset = Math.max(0, contentSize.height - layoutMeasurement.height);
+                if (contentOffset.y < -55) setWeekAnchor(addDays(weekAnchor, -7));
+                else if (contentOffset.y > maxOffset + 55) setWeekAnchor(addDays(weekAnchor, 7));
+              }}
+            >
               {Array.from({ length: 7 }, (_, i) => addDays(weekStartKey(weekAnchor), i)).map((k) => {
                 const items = itemsOn(k);
                 const isToday = k === today;
@@ -487,10 +512,10 @@ export default function CalendarScreen({
                   </TouchableOpacity>
                 );
               })}
-              <Text style={styles.wkHint}>Tap a day to jump back to it.</Text>
+              <Text style={styles.wkHint}>Tap a day to jump back to it · pull up or down for other weeks.</Text>
             </ScrollView>
           )}
-        </SafeAreaView>
+        </FullPage>
       </Modal>
     </SafeAreaView>
   );
