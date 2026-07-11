@@ -9,7 +9,8 @@
 //    Upcoming — the next three dated things, collapsed by default.
 //
 //  The floating ＋ opens the add pop-up: title, repeat (daily · weekly
-//  on chosen weekdays · every 2/4 weeks · monthly on a day) or deadline.
+//  on chosen weekdays · once a week on any day · every 2/4 weeks ·
+//  monthly on a day) or deadline.
 // =====================================================================
 
 import React, { useState } from 'react';
@@ -32,6 +33,7 @@ const REPEAT_MODES = [
   { id: 'off', label: 'Off' },
   { id: 'daily', label: 'Daily' },
   { id: 'weekly', label: 'Weekly' },
+  { id: 'rollweekly', label: 'Once a week' },
   { id: 'biweekly', label: '2 weeks' },
   { id: 'fourweekly', label: '4 weeks' },
   { id: 'monthly', label: 'Monthly' },
@@ -77,6 +79,7 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
   function buildRepeat() {
     if (mode === 'daily') return { type: 'weekly', days: [0, 1, 2, 3, 4, 5, 6] };
     if (mode === 'weekly') return weekdays.length ? { type: 'weekly', days: weekdays } : null;
+    if (mode === 'rollweekly') return { type: 'rolling', every: 7, start: startKey };
     if (mode === 'biweekly') return { type: 'interval', every: 14, start: startKey };
     if (mode === 'fourweekly') return { type: 'interval', every: 28, start: startKey };
     if (mode === 'monthly') return { type: 'monthly', day: monthDay };
@@ -294,8 +297,8 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
               </View>
             )}
 
-            {/* Every 2/4 weeks → start date */}
-            {(mode === 'biweekly' || mode === 'fourweekly') && (
+            {/* Once a week / every 2/4 weeks → start date */}
+            {(mode === 'rollweekly' || mode === 'biweekly' || mode === 'fourweekly') && (
               <TouchableOpacity style={styles.fieldRow} onPress={() => setPage('start')}>
                 <Text style={styles.fieldLabel}>Starts</Text>
                 <Text style={styles.fieldValue}>{shortDate(startKey)} ›</Text>

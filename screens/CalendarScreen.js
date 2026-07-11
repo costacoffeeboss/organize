@@ -81,7 +81,9 @@ export default function CalendarScreen({
   // --- What's happening on a given day? ---
   function todosOn(key) {
     return todos.filter((t) =>
-      t.repeat ? repeatOccursOn(t.repeat, key) : t.deadline === key
+      t.repeat
+        ? (t.repeat.type === 'rolling' ? t.nextDue === key : repeatOccursOn(t.repeat, key))
+        : t.deadline === key
     );
   }
   function eventsOn(key) {

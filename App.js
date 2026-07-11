@@ -242,9 +242,12 @@ export default function App() {
       if (t.repeat) {
         // Recurring: stays ticked for the rest of today, then hides
         // until it's next due. Unticking today brings it straight back.
+        // Rolling repeats ("once a week, any day") come back a fixed
+        // number of days after the tick rather than on a fixed day.
+        const rolling = t.repeat.type === 'rolling';
         return t.completedOn === today
-          ? { ...t, completedOn: null, nextDue: nextOccurrence(t.repeat, today) }
-          : { ...t, completedOn: today, nextDue: nextOccurrence(t.repeat, addDays(today, 1)) };
+          ? { ...t, completedOn: null, nextDue: rolling ? today : nextOccurrence(t.repeat, today) }
+          : { ...t, completedOn: today, nextDue: rolling ? addDays(today, t.repeat.every) : nextOccurrence(t.repeat, addDays(today, 1)) };
       }
 
       // One-off: ticked today, tidied away overnight (see the load effect).

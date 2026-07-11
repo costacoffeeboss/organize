@@ -58,6 +58,9 @@ function clampedKey(year, month, day) {
 //  Repeats
 //  A to-do's repeat is null or one of:
 //    { type: 'weekly',   days: [0..6] }            Mon=0 … Sun=6
+//    { type: 'rolling',  every: 7, start }         once a week, any day —
+//                                                  due again `every` days
+//                                                  after it's ticked off
 //    { type: 'interval', every: 14 | 28, start }   every 2 / 4 weeks
 //    { type: 'monthly',  day: 1..31 }              same date each month
 // =====================================================================
@@ -70,6 +73,11 @@ export function repeatOccursOn(repeat, key) {
   if (!repeat) return false;
   if (repeat.type === 'weekly') {
     return repeat.days.includes(weekdayIndex(key));
+  }
+  if (repeat.type === 'rolling') {
+    // No fixed days — when it's due lives on the to-do (nextDue),
+    // so callers check that instead.
+    return false;
   }
   if (repeat.type === 'interval') {
     if (key < repeat.start) return false;
@@ -91,6 +99,11 @@ export function nextOccurrence(repeat, from) {
       if (repeat.days.includes(weekdayIndex(k))) return k;
     }
     return null; // empty days array — shouldn't happen
+  }
+  if (repeat.type === 'rolling') {
+    // Due straight away (or on its start date if that's later);
+    // after a tick the to-do's nextDue is set directly.
+    return repeat.start && from < repeat.start ? repeat.start : from;
   }
   if (repeat.type === 'interval') {
     if (from <= repeat.start) return repeat.start;
@@ -121,6 +134,7 @@ export function repeatLabel(repeat) {
     if (repeat.days.length === 7) return 'daily';
     return repeat.days.map((d) => WEEKDAY_NAMES[d]).join(' + ');
   }
+  if (repeat.type === 'rolling') return 'once a week';
   if (repeat.type === 'interval') {
     return repeat.every === 14 ? 'every 2 wks' : 'every 4 wks';
   }

@@ -114,7 +114,8 @@ export default function HomeScreen({
   const overdueTodos = todos.filter((t) => !t.repeat && !t.done && t.deadline && t.deadline < today);
   const dueTodos = todos.filter((t) =>
     t.repeat
-      ? (t.completedOn === today || repeatOccursOn(t.repeat, today))
+      ? (t.completedOn === today ||
+         (t.repeat.type === 'rolling' ? t.nextDue <= today : repeatOccursOn(t.repeat, today)))
       : t.deadline === today
   );
   const scheduleEmpty =
