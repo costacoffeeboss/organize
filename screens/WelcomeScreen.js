@@ -13,7 +13,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Animated, Easing,
-  KeyboardAvoidingView, Platform, StyleSheet,
+  Keyboard, Platform, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -93,12 +93,35 @@ export default function WelcomeScreen({ onDone }) {
   const stepFade = useRef(new Animated.Value(1)).current;   // between steps
   const screenFade = useRef(new Animated.Value(1)).current; // final exit
   const halo = useRef(new Animated.Value(0)).current;       // background glow
+  const lift = useRef(new Animated.Value(0)).current;       // keyboard avoidance
 
   useEffect(() => {
     Animated.timing(halo, {
       toValue: 1, duration: 1600,
       easing: Easing.out(Easing.quad), useNativeDriver: true,
     }).start();
+  }, []);
+
+  // KeyboardAvoidingView is unreliable on the new architecture, so we
+  // track the keyboard ourselves and slide the step content up with it.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, (e) => {
+      Animated.timing(lift, {
+        toValue: -Math.round(e.endCoordinates.height * 0.5),
+        duration: e.duration || 250,
+        easing: Easing.out(Easing.quad), useNativeDriver: true,
+      }).start();
+    });
+    const onHide = Keyboard.addListener(hideEvt, (e) => {
+      Animated.timing(lift, {
+        toValue: 0,
+        duration: (e && e.duration) || 250,
+        easing: Easing.out(Easing.quad), useNativeDriver: true,
+      }).start();
+    });
+    return () => { onShow.remove(); onHide.remove(); };
   }, []);
 
   function goTo(next) {
@@ -125,11 +148,10 @@ export default function WelcomeScreen({ onDone }) {
       }]} />
 
       <SafeAreaView style={styles.safe}>
-        <KeyboardAvoidingView
-          style={styles.body}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <Animated.View style={[styles.stepWrap, { opacity: stepFade }]}>
+        <View style={styles.body}>
+          <Animated.View
+            style={[styles.stepWrap, { opacity: stepFade, transform: [{ translateY: lift }] }]}
+          >
             {/* Scrollable so the keyboard can never hide the content —
                 the name step shrinks-and-scrolls instead of vanishing. */}
             <ScrollView
@@ -235,7 +257,7 @@ export default function WelcomeScreen({ onDone }) {
               <View key={i} style={[styles.dot, step === i && styles.dotOn]} />
             ))}
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </SafeAreaView>
     </Animated.View>
   );
