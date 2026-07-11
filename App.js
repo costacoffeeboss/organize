@@ -356,6 +356,29 @@ export default function App() {
     AsyncStorage.setItem(NAME_KEY, chosenName).catch(() => {});
   }
 
+  // ================= Settings =================
+
+  function updateName(newName) {
+    setName(newName);
+    AsyncStorage.setItem(NAME_KEY, newName).catch(() => {});
+  }
+
+  // Wipe everything — storage and state — and return to the welcome
+  // flow, exactly like a fresh install.
+  async function resetAllData() {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      // Everything the app owns is namespaced @organize_* or @atomic_*.
+      await AsyncStorage.multiRemove(
+        keys.filter((k) => k.startsWith('@organize_') || k.startsWith('@atomic_'))
+      );
+    } catch (e) {}
+    setHabits([]); setTodos([]); setEvents([]); setReminders([]);
+    setJournal({}); setGoals([]); setSteps({});
+    setJournalSeed(null); setName('');
+    setWelcomed(false); // straight back to the welcome flow
+  }
+
   // ================= Navigation =================
 
   const ICONS = {
@@ -428,6 +451,8 @@ export default function App() {
                 journal={journal}
                 toggleTodo={toggleTodo}
                 onSeedJournal={setJournalSeed}
+                onUpdateName={updateName}
+                onResetAll={resetAllData}
               />
             )}
           </Tab.Screen>

@@ -9,11 +9,12 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SERIF } from '../theme';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
@@ -24,6 +25,7 @@ import ScreenHeader from '../components/ScreenHeader';
 import CompanionCard from '../components/CompanionCard';
 import ProgressRing from '../components/ProgressRing';
 import TodoRow from '../components/TodoRow';
+import ModalShell from '../components/ModalShell';
 import Rise from '../components/Rise';
 
 const DISMISSED_KEY = '@organize_dismissed_notices';
@@ -38,10 +40,48 @@ const PROMPTS = [
 
 export default function HomeScreen({
   name, habits, todos, events, reminders, journal, toggleTodo, onSeedJournal,
+  onUpdateName, onResetAll,
 }) {
   const navigation = useNavigation();
   const today = todayKey();
   const [dismissed, setDismissed] = useState([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  function openSettings() {
+    setNameDraft(name || '');
+    setShowSettings(true);
+  }
+
+  function saveName() {
+    onUpdateName(nameDraft.trim());
+    setShowSettings(false);
+  }
+
+  // Erasing everything deserves a double take.
+  function confirmReset() {
+    Alert.alert(
+      'Reset all data?',
+      'Every to-do, habit, journal entry, goal, event and reminder on this phone will be erased. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Erase everything', style: 'destructive',
+          onPress: () => Alert.alert(
+            'Absolutely sure?',
+            'Last chance — this wipes the app back to a fresh start.',
+            [
+              { text: 'Keep my data', style: 'cancel' },
+              {
+                text: 'Yes, erase it all', style: 'destructive',
+                onPress: () => { setShowSettings(false); onResetAll(); },
+              },
+            ]
+          ),
+        },
+      ]
+    );
+  }
 
   // --- Companion ---
   useEffect(() => {
@@ -89,10 +129,22 @@ export default function HomeScreen({
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader
-        title={name ? `${greetingLabel()}, ${name}` : 'Organize'}
-        subtitle={niceDate()}
-      />
+      {/* header + the settings cog, top right */}
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <ScreenHeader
+            title={name ? `${greetingLabel()}, ${name}` : 'Organize'}
+            subtitle={niceDate()}
+          />
+        </View>
+        <TouchableOpacity
+          style={styles.cog}
+          onPress={openSettings}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="settings-outline" size={22} color={COLORS.muted} />
+        </TouchableOpacity>
+      </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         {/* --- What Organize noticed --- */}
@@ -208,12 +260,78 @@ export default function HomeScreen({
           </TouchableOpacity>
         </Rise>
       </ScrollView>
+
+      {/* ================= Settings ================= */}
+      <ModalShell
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        title="Settings"
+      >
+        <View>
+          <Text style={styles.settingsLabel}>Your name</Text>
+          <View style={styles.nameRow}>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Your name"
+              placeholderTextColor={COLORS.muted2}
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              onSubmitEditing={saveName}
+              returnKeyType="done"
+            />
+            <TouchableOpacity style={styles.saveBtn} onPress={saveName}>
+              <Text style={styles.saveBtnText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.dangerZone}>
+            <Text style={styles.dangerLabel}>Danger zone</Text>
+            <TouchableOpacity style={styles.dangerBtn} onPress={confirmReset}>
+              <Text style={styles.dangerBtnText}>Reset all data</Text>
+            </TouchableOpacity>
+            <Text style={styles.dangerHint}>
+              Erases everything on this phone and starts the app fresh.
+            </Text>
+          </View>
+        </View>
+      </ModalShell>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
+
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  cog: { paddingTop: 18, paddingLeft: 10 },
+
+  settingsLabel: { color: COLORS.ink, fontSize: 14.5, fontWeight: '700', marginBottom: 8 },
+  nameRow: { flexDirection: 'row', gap: 8 },
+  nameInput: {
+    flex: 1, backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 12,
+    color: COLORS.ink, fontSize: 15.5,
+  },
+  saveBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingHorizontal: 18, justifyContent: 'center',
+  },
+  saveBtnText: { color: COLORS.bg, fontSize: 14.5, fontWeight: '700' },
+
+  dangerZone: {
+    marginTop: 22, paddingTop: 16,
+    borderTopWidth: 1, borderTopColor: COLORS.line,
+  },
+  dangerLabel: {
+    color: COLORS.danger, fontSize: 11.5, fontWeight: '800',
+    letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 10,
+  },
+  dangerBtn: {
+    borderWidth: 1.5, borderColor: COLORS.danger, borderRadius: 14,
+    paddingVertical: 13, alignItems: 'center',
+  },
+  dangerBtnText: { color: COLORS.danger, fontSize: 15, fontWeight: '700' },
+  dangerHint: { color: COLORS.muted2, fontSize: 12.5, marginTop: 9, textAlign: 'center' },
 
   card: {
     backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
