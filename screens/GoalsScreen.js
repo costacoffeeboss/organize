@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 import { todayKey, shortDate, diffDays } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import ModalShell from '../components/ModalShell';
@@ -44,6 +44,7 @@ function smartness(g) {
 }
 
 function SmartIntro({ onStart, onQuiz }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
       <Rise delay={0}>
@@ -85,6 +86,7 @@ function SmartIntro({ onStart, onQuiz }) {
 export default function GoalsScreen({
   goals, addGoal, updateGoal, toggleMilestone, markGoalAchieved, deleteGoal,
 }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
   const [introSeen, setIntroSeen] = useState(true);
   const [showIntroModal, setShowIntroModal] = useState(false);
@@ -196,6 +198,7 @@ export default function GoalsScreen({
   }
 
   function GoalCard({ goal }) {
+    const { COLORS, styles } = useThemedStyles(makeStyles);
     const done = goal.milestones.filter((m) => m.done).length;
     const total = goal.milestones.length;
     const pct = total === 0 ? 0 : Math.round((done / total) * 100);
@@ -504,7 +507,7 @@ export default function GoalsScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
   // --- intro ---

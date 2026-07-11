@@ -4,6 +4,12 @@
 //  birthdays (gold dot) and To-dos due that day (soft dot). Tap a day
 //  and the bottom list shows those three groups; ＋ adds an event or
 //  reminder on the selected day.
+//
+//  Events and reminders are the one thing Life and Work share. Each
+//  belongs to the side it was added on (`owner`) and — unless the
+//  "also in the other calendar" toggle was switched off — shows on
+//  both sides, always wearing its home side's colours: a Work meeting
+//  stays black-and-silver inside cream Life, and vice versa.
 // =====================================================================
 
 import React, { useState } from 'react';
@@ -12,7 +18,7 @@ import {
   PanResponder, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import {
   todayKey, monthLabel, shortDate, monthCells, repeatOccursOn,
   reminderOccursOn, weekStartKey, addDays, parseKey, WEEKDAY_LETTERS,
@@ -29,14 +35,18 @@ const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 
 export default function CalendarScreen({
-  todos, toggleTodo, events, addEvent, deleteEvent,
-  reminders, addReminder, deleteReminder,
+  mode, todos, toggleTodo, events, addEvent, deleteEvent, unshareEvent,
+  reminders, addReminder, deleteReminder, unshareReminder,
 }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const now = new Date();
   const today = todayKey();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth()); // 0-based
   const [selected, setSelected] = useState(today);
+
+  const otherLabel = mode === 'life' ? 'Work' : 'Life';
+  const hereLabel = mode === 'life' ? 'Life' : 'Work';
 
   // --- Expanded, full-screen calendar ---
   const [expanded, setExpanded] = useState(false);
@@ -53,18 +63,22 @@ export default function CalendarScreen({
   const [hour, setHour] = useState('09');
   const [minute, setMinute] = useState('00');
   const [yearly, setYearly] = useState(false);
+  const [shareAcross, setShareAcross] = useState(true); // both calendars by default
 
   function openAdd() {
     setPage('form'); setKind('event'); setTitle('');
     setDate(selected); setTimeOn(false); setHour('09'); setMinute('00');
-    setYearly(false); setShowAdd(true);
+    setYearly(false); setShareAcross(true); setShowAdd(true);
   }
 
   function onAdd() {
     const t = title.trim();
     if (!t) return;
-    if (kind === 'event') addEvent({ title: t, date, time: timeOn ? `${hour}:${minute}` : null });
-    else addReminder({ title: t, date, yearly });
+    if (kind === 'event') {
+      addEvent({ title: t, date, time: timeOn ? `${hour}:${minute}` : null, shared: shareAcross });
+    } else {
+      addReminder({ title: t, date, yearly, shared: shareAcross });
+    }
     setShowAdd(false);
     setSelected(date);
   }
@@ -79,6 +93,9 @@ export default function CalendarScreen({
   }
 
   // --- What's happening on a given day? ---
+  // This side sees its own entries plus anything shared from the other.
+  const visible = (x) => x.owner === mode || x.shared;
+
   function todosOn(key) {
     return todos.filter((t) =>
       t.repeat
@@ -88,21 +105,40 @@ export default function CalendarScreen({
   }
   function eventsOn(key) {
     return events
-      .filter((e) => e.date === key)
+      .filter((e) => visible(e) && e.date === key)
       .sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1); // all-day first
   }
   function remindersOn(key) {
-    return reminders.filter((r) => reminderOccursOn(r, key));
+    return reminders.filter((r) => visible(r) && reminderOccursOn(r, key));
   }
 
   // Everything on a day, in ribbon order: events, reminders, to-dos.
   function itemsOn(key) {
     return [
-      ...eventsOn(key).map((e) => ({ id: `e${e.id}`, kind: 'event', title: e.title, time: e.time })),
-      ...remindersOn(key).map((r) => ({ id: `r${r.id}`, kind: 'reminder', title: r.title })),
-      ...todosOn(key).map((t) => ({ id: `t${t.id}`, kind: 'todo', title: t.title })),
+      ...eventsOn(key).map((e) => ({ id: `e${e.id}`, kind: 'event', title: e.title, time: e.time, owner: e.owner })),
+      ...remindersOn(key).map((r) => ({ id: `r${r.id}`, kind: 'reminder', title: r.title, owner: r.owner })),
+      ...todosOn(key).map((t) => ({ id: `t${t.id}`, kind: 'todo', title: t.title, owner: mode })),
     ];
   }
+
+  // --- The other side's colours, for entries that live there ---
+  const foreign = (owner) => owner !== mode;
+  // Small dots: our entries keep espresso/gold; theirs wear their side's
+  // signature surface (black graphite in Life, warm cream in Work).
+  const dotFor = (it) => {
+    if (foreign(it.owner)) return paletteFor(it.owner).crema;
+    return it.kind === 'event' ? COLORS.espresso
+      : it.kind === 'reminder' ? COLORS.gold : COLORS.muted2;
+  };
+  // Ribbons in the big month view: foreign entries get their home
+  // side's surface + accent text so they're unmistakable.
+  const foreignRibbon = (owner) => {
+    const p = paletteFor(owner);
+    return {
+      box: { backgroundColor: p.mode === 'work' ? p.panelDeep : p.crema },
+      text: { color: p.espresso },
+    };
+  };
 
   function pickDayAndClose(key) {
     setSelected(key);
@@ -129,8 +165,13 @@ export default function CalendarScreen({
   monthCells(year, month).forEach((cell) => {
     if (!cell) return;
     const d = [];
-    if (eventsOn(cell.key).length) d.push(COLORS.espresso);
-    if (remindersOn(cell.key).length) d.push(COLORS.gold);
+    const ev = eventsOn(cell.key);
+    const rem = remindersOn(cell.key);
+    if (ev.some((e) => !foreign(e.owner))) d.push(COLORS.espresso);
+    if (rem.some((r) => !foreign(r.owner))) d.push(COLORS.gold);
+    if ([...ev, ...rem].some((x) => foreign(x.owner))) {
+      d.push(paletteFor(mode === 'life' ? 'work' : 'life').crema);
+    }
     if (todosOn(cell.key).length) d.push(COLORS.muted2);
     if (d.length) dots[cell.key] = d;
   });
@@ -146,6 +187,25 @@ export default function CalendarScreen({
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: fn },
     ]);
+  }
+
+  // Long-press on a shared entry from the other side: the gentle option
+  // just removes it from this calendar; deleting everywhere is explicit.
+  function confirmRemove(label, item, deleteFn, unshareFn) {
+    if (!foreign(item.owner)) {
+      confirmDelete(label, () => deleteFn(item.id));
+      return;
+    }
+    const ownerName = item.owner === 'work' ? 'Work' : 'Life';
+    Alert.alert(
+      `Remove ${label}?`,
+      `This ${label} lives in your ${ownerName} calendar and is shared into ${hereLabel}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: `Remove from ${hereLabel} only`, onPress: () => unshareFn(item.id) },
+        { text: 'Delete everywhere', style: 'destructive', onPress: () => deleteFn(item.id) },
+      ]
+    );
   }
 
   const isTodoDone = (t) => (t.repeat ? t.completedOn === selected : t.done);
@@ -194,11 +254,14 @@ export default function CalendarScreen({
               <TouchableOpacity
                 key={e.id}
                 style={styles.itemRow}
-                onLongPress={() => confirmDelete('event', () => deleteEvent(e.id))}
+                onLongPress={() => confirmRemove('event', e, deleteEvent, unshareEvent)}
                 activeOpacity={0.8}
               >
-                <View style={[styles.itemDot, { backgroundColor: COLORS.espresso }]} />
+                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'event', owner: e.owner }) }]} />
                 <Text style={styles.itemTitle} numberOfLines={2}>{e.title}</Text>
+                {foreign(e.owner) && (
+                  <Text style={styles.ownerTag}>{e.owner === 'work' ? 'Work' : 'Life'}</Text>
+                )}
                 <Text style={styles.itemMeta}>{e.time || 'all day'}</Text>
               </TouchableOpacity>
             ))}
@@ -213,11 +276,14 @@ export default function CalendarScreen({
               <TouchableOpacity
                 key={r.id}
                 style={styles.itemRow}
-                onLongPress={() => confirmDelete('reminder', () => deleteReminder(r.id))}
+                onLongPress={() => confirmRemove('reminder', r, deleteReminder, unshareReminder)}
                 activeOpacity={0.8}
               >
-                <View style={[styles.itemDot, { backgroundColor: COLORS.gold }]} />
+                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'reminder', owner: r.owner }) }]} />
                 <Text style={styles.itemTitle} numberOfLines={2}>{r.title}</Text>
+                {foreign(r.owner) && (
+                  <Text style={styles.ownerTag}>{r.owner === 'work' ? 'Work' : 'Life'}</Text>
+                )}
                 {r.yearly && <Text style={styles.itemMeta}>yearly</Text>}
               </TouchableOpacity>
             ))}
@@ -338,6 +404,14 @@ export default function CalendarScreen({
               </TouchableOpacity>
             )}
 
+            {/* Shared into the other side's calendar (on by default) */}
+            <TouchableOpacity style={styles.fieldRow} onPress={() => setShareAcross(!shareAcross)}>
+              <Text style={styles.fieldLabel}>Also in <Text style={styles.fieldItalic}>{otherLabel}</Text> calendar</Text>
+              <View style={[styles.toggle, shareAcross && styles.toggleOn]}>
+                <View style={[styles.knob, shareAcross && styles.knobOn]} />
+              </View>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.primaryBtn, !title.trim() && { opacity: 0.4 }]}
               onPress={onAdd}
@@ -442,21 +516,30 @@ export default function CalendarScreen({
                           <Text style={[styles.bigDayNum, isToday && styles.bigDayToday]}>
                             {cell.day}
                           </Text>
-                          {items.slice(0, 3).map((it) => (
-                            <View key={it.id} style={[
-                              styles.ribbon,
-                              it.kind === 'event' && styles.ribbonEvent,
-                              it.kind === 'reminder' && styles.ribbonReminder,
-                              it.kind === 'todo' && styles.ribbonTodo,
-                            ]}>
-                              <Text
-                                style={[styles.ribbonText, it.kind === 'todo' && styles.ribbonTextTodo]}
-                                numberOfLines={1}
-                              >
-                                {it.title}
-                              </Text>
-                            </View>
-                          ))}
+                          {items.slice(0, 3).map((it) => {
+                            const away = it.kind !== 'todo' && foreign(it.owner);
+                            const f = away ? foreignRibbon(it.owner) : null;
+                            return (
+                              <View key={it.id} style={[
+                                styles.ribbon,
+                                it.kind === 'event' && styles.ribbonEvent,
+                                it.kind === 'reminder' && styles.ribbonReminder,
+                                it.kind === 'todo' && styles.ribbonTodo,
+                                away && f.box,
+                              ]}>
+                                <Text
+                                  style={[
+                                    styles.ribbonText,
+                                    it.kind === 'todo' && styles.ribbonTextTodo,
+                                    away && f.text,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {it.title}
+                                </Text>
+                              </View>
+                            );
+                          })}
                           {items.length > 3 && (
                             <Text style={styles.moreText}>+{items.length - 3}</Text>
                           )}
@@ -502,11 +585,11 @@ export default function CalendarScreen({
                       {items.length === 0 && <Text style={styles.wkEmpty}>—</Text>}
                       {items.map((it) => (
                         <View key={it.id} style={styles.wkItem}>
-                          <View style={[styles.itemDot, {
-                            backgroundColor: it.kind === 'event' ? COLORS.espresso
-                              : it.kind === 'reminder' ? COLORS.gold : COLORS.muted2,
-                          }]} />
+                          <View style={[styles.itemDot, { backgroundColor: dotFor(it) }]} />
                           <Text style={styles.wkItemText} numberOfLines={1}>{it.title}</Text>
+                          {it.kind !== 'todo' && foreign(it.owner) && (
+                            <Text style={styles.ownerTag}>{it.owner === 'work' ? 'Work' : 'Life'}</Text>
+                          )}
                           {it.time && <Text style={styles.wkTime}>{it.time}</Text>}
                         </View>
                       ))}
@@ -523,7 +606,10 @@ export default function CalendarScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => {
+  // themed rgba tints (espresso-brown in Life, silver in Work)
+  const tint = COLORS.mode === 'work' ? '201,205,214' : '75,54,38';
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
   card: {
     backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
@@ -571,7 +657,7 @@ const styles = StyleSheet.create({
     flex: 1, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.lineStrong,
     paddingTop: 4, paddingHorizontal: 2, overflow: 'hidden',
   },
-  bigCellSel: { backgroundColor: 'rgba(75,54,38,0.07)', borderRadius: 8 },
+  bigCellSel: { backgroundColor: `rgba(${tint},0.07)`, borderRadius: 8 },
   bigDayNum: {
     color: COLORS.ink, fontSize: 12.5, fontWeight: '600',
     textAlign: 'center', marginBottom: 3,
@@ -580,7 +666,7 @@ const styles = StyleSheet.create({
   ribbon: { borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, marginBottom: 2 },
   ribbonEvent: { backgroundColor: COLORS.espresso },
   ribbonReminder: { backgroundColor: COLORS.gold },
-  ribbonTodo: { backgroundColor: 'rgba(59,44,30,0.08)', borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.lineStrong },
+  ribbonTodo: { backgroundColor: `rgba(${tint},0.08)`, borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.lineStrong },
   ribbonText: { color: COLORS.bg, fontSize: 8.5, fontWeight: '700' },
   ribbonTextTodo: { color: COLORS.muted },
   moreText: { color: COLORS.muted2, fontSize: 9, fontWeight: '700', textAlign: 'center' },
@@ -590,7 +676,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14, paddingHorizontal: 18,
     borderBottomWidth: 1, borderBottomColor: COLORS.line,
   },
-  wkRowToday: { backgroundColor: 'rgba(75,54,38,0.05)' },
+  wkRowToday: { backgroundColor: `rgba(${tint},0.05)` },
   wkDayCol: { width: 46, alignItems: 'center' },
   wkDayName: { color: COLORS.muted2, fontSize: 11.5, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
   wkDayNum: { color: COLORS.ink, fontSize: 21, fontWeight: '600', fontFamily: SERIF, marginTop: 1 },
@@ -620,6 +706,10 @@ const styles = StyleSheet.create({
   itemDot: { width: 9, height: 9, borderRadius: 5, marginRight: 13 },
   itemTitle: { color: COLORS.ink, fontSize: 16, flex: 1 },
   itemMeta: { color: COLORS.espressoLight, fontSize: 12.5, fontWeight: '600', marginLeft: 10 },
+  ownerTag: {
+    color: COLORS.muted2, fontSize: 11.5, fontWeight: '600',
+    fontStyle: 'italic', fontFamily: SERIF, marginLeft: 8,
+  },
 
   // --- pop-up ---
   segment: {
@@ -643,6 +733,7 @@ const styles = StyleSheet.create({
     borderRadius: 14, paddingHorizontal: 16, paddingVertical: 13, marginBottom: 12,
   },
   fieldLabel: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
+  fieldItalic: { fontStyle: 'italic', color: COLORS.espressoLight },
   fieldValue: { color: COLORS.espressoLight, fontSize: 14, fontWeight: '600' },
 
   timeRow: { marginBottom: 8 },
@@ -658,7 +749,7 @@ const styles = StyleSheet.create({
 
   toggle: {
     width: 46, height: 28, borderRadius: 14, padding: 3,
-    backgroundColor: 'rgba(59,44,30,0.15)',
+    backgroundColor: `rgba(${tint},0.15)`,
   },
   toggleOn: { backgroundColor: COLORS.espresso },
   knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.panel },
@@ -675,4 +766,5 @@ const styles = StyleSheet.create({
     marginTop: 12, paddingHorizontal: 4,
   },
   linkBtn: { color: COLORS.espresso, fontSize: 15, fontWeight: '700' },
-});
+  });
+};

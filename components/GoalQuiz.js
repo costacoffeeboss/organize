@@ -16,7 +16,7 @@ import {
   View, Text, TouchableOpacity, ScrollView, Modal, Animated, Easing, StyleSheet,
 } from 'react-native';
 import FullPage from './FullPage';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 import Rise from './Rise';
 
 const QUESTIONS = [
@@ -119,6 +119,7 @@ const RANK_LABELS = ['Best match', 'Strong match', 'Good match', 'Wildcard'];
 const RANK_COUNTS = [3, 2, 2, 1];
 
 export default function GoalQuiz({ visible, onClose, onPick, onStartBlank }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const [step, setStep] = useState(0);
   const [scores, setScores] = useState({});
   const [tip, setTip] = useState(null);
@@ -244,7 +245,7 @@ export default function GoalQuiz({ visible, onClose, onPick, onStartBlank }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   head: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

@@ -5,6 +5,12 @@
 //    · what's on the schedule — events, reminders, due to-dos
 //    · a nudge to journal (or today's entry, once written)
 //  Every card is a doorway: tap through to the tab it summarises.
+//
+//  Top-left lives the side-switch mark: a mini stacked-squares logo in
+//  the OTHER side's colours. Tap it → "Switch to Organize Work?" (or
+//  back to Life) → the app re-themes. Calendar entries from the other
+//  side keep their home colours here, so a work meeting still reads
+//  black-and-silver inside cream Life.
 // =====================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -15,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
   currentStreak,
@@ -38,15 +44,48 @@ const PROMPTS = [
   'What did today teach you?',
 ];
 
+// The mini 2×2 mark that switches sides — drawn in the destination
+// side's colours so it reads as a doorway, not decoration.
+function SwitchMark({ target, onPress }) {
+  const c = paletteFor(target);
+  const sq = (filled) => ({
+    width: 9, height: 9, borderRadius: 2.5,
+    borderWidth: 1.3, borderColor: c.espresso,
+    backgroundColor: filled ? c.espresso : 'transparent',
+  });
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      style={{
+        width: 38, height: 38, borderRadius: 11,
+        backgroundColor: c.bg, borderWidth: 1, borderColor: c.lineStrong,
+        alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <View style={{ flexDirection: 'row', gap: 3, marginBottom: 3 }}>
+        <View style={sq(true)} /><View style={sq(false)} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 3 }}>
+        <View style={sq(false)} /><View style={sq(false)} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen({
-  name, habits, todos, events, reminders, journal, toggleTodo, onSeedJournal,
-  onUpdateName, onResetAll,
+  name, mode, habits, todos, events, reminders, journal, toggleTodo,
+  onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
 }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const navigation = useNavigation();
   const today = todayKey();
   const [dismissed, setDismissed] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSwitch, setShowSwitch] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+
+  const otherMode = mode === 'life' ? 'work' : 'life';
 
   function openSettings() {
     setNameDraft(name || '');
@@ -62,7 +101,7 @@ export default function HomeScreen({
   function confirmReset() {
     Alert.alert(
       'Reset all data?',
-      'Every to-do, habit, journal entry, goal, event and reminder on this phone will be erased. This cannot be undone.',
+      'Every to-do, habit, journal entry, goal, event and reminder on this phone — Life and Work — will be erased. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -83,18 +122,19 @@ export default function HomeScreen({
     );
   }
 
-  // --- Companion ---
+  // --- Companion (dismissals are remembered per side) ---
+  const dismissKey = mode === 'work' ? `${DISMISSED_KEY}_work` : DISMISSED_KEY;
   useEffect(() => {
-    AsyncStorage.getItem(DISMISSED_KEY)
-      .then((v) => { if (v) setDismissed(JSON.parse(v)); })
+    AsyncStorage.getItem(dismissKey)
+      .then((v) => { setDismissed(v ? JSON.parse(v) : []); })
       .catch(() => {});
-  }, []);
+  }, [dismissKey]);
   const notices = getNotices({ habits, todos, journal, today });
   const notice = notices.find((n) => !dismissed.includes(n.id));
   function dismissNotice(n) {
     const next = [...dismissed, n.id].filter((id) => id.endsWith(today));
     setDismissed(next);
-    AsyncStorage.setItem(DISMISSED_KEY, JSON.stringify(next)).catch(() => {});
+    AsyncStorage.setItem(dismissKey, JSON.stringify(next)).catch(() => {});
   }
 
   // --- Habits ring ---
@@ -107,10 +147,13 @@ export default function HomeScreen({
     .map((h) => h.streak || 0));
 
   // --- Today's schedule ---
+  // Calendar entries are shared stores: show ours, plus anything the
+  // other side shared across. Foreign entries keep their side's colours.
+  const visible = (x) => x.owner === mode || x.shared;
   const dayEvents = events
-    .filter((e) => e.date === today)
+    .filter((e) => visible(e) && e.date === today)
     .sort((a, b) => ((a.time || '') < (b.time || '') ? -1 : 1));
-  const dayReminders = reminders.filter((r) => reminderOccursOn(r, today));
+  const dayReminders = reminders.filter((r) => visible(r) && reminderOccursOn(r, today));
   const overdueTodos = todos.filter((t) => !t.repeat && !t.done && t.deadline && t.deadline < today);
   const dueTodos = todos.filter((t) =>
     t.repeat
@@ -123,6 +166,13 @@ export default function HomeScreen({
 
   const isTodoDone = (t) => (t.repeat ? t.completedOn === today : t.done);
 
+  // Dot colours: our own entries use the accent; the other side's use
+  // its signature surface so they're unmistakable at a glance.
+  const eventDot = (e) =>
+    e.owner === mode ? COLORS.espresso : paletteFor(e.owner).crema;
+  const reminderDot = (r) =>
+    r.owner === mode ? COLORS.gold : paletteFor(r.owner).crema;
+
   // --- Journal card ---
   const todayEntry = journal[today];
   const jStreak = currentStreak(new Set(Object.keys(journal)));
@@ -130,8 +180,11 @@ export default function HomeScreen({
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* header + the settings cog, top right */}
+      {/* switch mark top left · greeting · settings cog top right */}
       <View style={styles.headerRow}>
+        <View style={styles.switchWrap}>
+          <SwitchMark target={otherMode} onPress={() => setShowSwitch(true)} />
+        </View>
         <View style={{ flex: 1 }}>
           <ScreenHeader
             title={name ? `${greetingLabel()}, ${name}` : 'Organize'}
@@ -200,14 +253,14 @@ export default function HomeScreen({
 
             {dayEvents.map((e) => (
               <View key={e.id} style={styles.lineRow}>
-                <View style={[styles.lineDot, { backgroundColor: COLORS.espresso }]} />
+                <View style={[styles.lineDot, { backgroundColor: eventDot(e) }]} />
                 <Text style={styles.lineText} numberOfLines={1}>{e.title}</Text>
                 <Text style={styles.lineMeta}>{e.time || 'all day'}</Text>
               </View>
             ))}
             {dayReminders.map((r) => (
               <View key={r.id} style={styles.lineRow}>
-                <View style={[styles.lineDot, { backgroundColor: COLORS.gold }]} />
+                <View style={[styles.lineDot, { backgroundColor: reminderDot(r) }]} />
                 <Text style={styles.lineText} numberOfLines={1}>{r.title}</Text>
                 {r.yearly && <Text style={styles.lineMeta}>yearly</Text>}
               </View>
@@ -262,6 +315,35 @@ export default function HomeScreen({
         </Rise>
       </ScrollView>
 
+      {/* ================= Switch sides ================= */}
+      <ModalShell
+        visible={showSwitch}
+        onClose={() => setShowSwitch(false)}
+        title={
+          <Text>
+            Switch to Organize<Text style={styles.switchItalic}> {otherMode === 'work' ? 'Work' : 'Life'}</Text>?
+          </Text>
+        }
+      >
+        <View>
+          <Text style={styles.switchBlurb}>
+            {otherMode === 'work'
+              ? 'Same place, sharper suit — your work to-dos, habits, goals and journal live separately over there.'
+              : 'Back to the coffee side — everything personal, kept apart from work.'}
+          </Text>
+          <TouchableOpacity
+            style={styles.switchBtn}
+            onPress={() => { setShowSwitch(false); onSwitchMode(); }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.switchBtnText}>Switch</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.switchGhost} onPress={() => setShowSwitch(false)}>
+            <Text style={styles.switchGhostText}>Not now</Text>
+          </TouchableOpacity>
+        </View>
+      </ModalShell>
+
       {/* ================= Settings ================= */}
       <ModalShell
         visible={showSettings}
@@ -300,11 +382,22 @@ export default function HomeScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  switchWrap: { paddingTop: 16, marginRight: 12 },
   cog: { paddingTop: 18, paddingLeft: 10 },
+
+  switchItalic: { fontStyle: 'italic', color: COLORS.espressoLight },
+  switchBlurb: { color: COLORS.muted, fontSize: 14.5, lineHeight: 21, marginBottom: 16 },
+  switchBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  switchBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '700' },
+  switchGhost: { alignItems: 'center', paddingVertical: 13 },
+  switchGhostText: { color: COLORS.muted2, fontSize: 14.5, fontWeight: '600' },
 
   settingsLabel: { color: COLORS.ink, fontSize: 14.5, fontWeight: '700', marginBottom: 8 },
   nameRow: { flexDirection: 'row', gap: 8 },
@@ -358,14 +451,20 @@ const styles = StyleSheet.create({
 
   journalCard: {
     backgroundColor: COLORS.crema, borderWidth: 1,
-    borderColor: 'rgba(75,54,38,0.2)', borderRadius: 16,
+    borderColor: COLORS.lineStrong, borderRadius: 16,
     padding: 16, marginBottom: 14,
   },
-  journalText: { color: '#4b3d2c', fontSize: 14.5, lineHeight: 21 },
-  journalPrompt: { color: '#4b3d2c', fontSize: 15, fontStyle: 'italic', fontFamily: SERIF, lineHeight: 22 },
+  journalText: {
+    color: COLORS.mode === 'work' ? '#d6d9e0' : '#4b3d2c',
+    fontSize: 14.5, lineHeight: 21,
+  },
+  journalPrompt: {
+    color: COLORS.mode === 'work' ? '#d6d9e0' : '#4b3d2c',
+    fontSize: 15, fontStyle: 'italic', fontFamily: SERIF, lineHeight: 22,
+  },
   streakTag: {
     color: COLORS.espressoLight, fontSize: 12, fontWeight: '700',
-    borderWidth: 1, borderColor: 'rgba(75,54,38,0.3)',
+    borderWidth: 1, borderColor: COLORS.lineStrong,
     paddingHorizontal: 9, paddingVertical: 2, borderRadius: 999,
   },
 });

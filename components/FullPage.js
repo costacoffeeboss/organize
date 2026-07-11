@@ -10,9 +10,10 @@
 import React from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS } from '../theme';
+import { useTheme } from '../theme';
 
 export default function FullPage({ children, style }) {
+  const COLORS = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <View style={[{

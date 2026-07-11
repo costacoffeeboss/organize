@@ -18,7 +18,7 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS } from '../theme';
+import { useThemedStyles } from '../theme';
 import {
   todayKey, shortDate, niceDate, repeatLabel, WEEKDAY_LETTERS,
 } from '../utils/dates';
@@ -40,6 +40,7 @@ const REPEAT_MODES = [
 ];
 
 export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
 
   // Which groups are open. To-do starts open (it's the working list),
@@ -381,7 +382,7 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
   plainTitle: {

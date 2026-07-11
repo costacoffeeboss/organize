@@ -14,9 +14,10 @@ import {
   Modal, View, Text, TouchableOpacity, TouchableWithoutFeedback,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 
 export default function ModalShell({ visible, onClose, title, children }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -43,7 +44,7 @@ export default function ModalShell({ visible, onClose, title, children }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   backdrop: {
     flex: 1, backgroundColor: 'rgba(42,33,24,0.45)',
     justifyContent: 'center', padding: 22,

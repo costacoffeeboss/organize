@@ -16,9 +16,10 @@
 
 import React, { useRef, useEffect } from 'react';
 import { Text, TouchableOpacity, Animated, StyleSheet } from 'react-native';
-import { COLORS } from '../theme';
+import { useThemedStyles } from '../theme';
 
 export default function TodoRow({ title, done, meta, metaColor, onToggle, onLongPress }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const pop = useRef(new Animated.Value(1)).current;
   const wasDone = useRef(done);
 
@@ -51,7 +52,7 @@ export default function TodoRow({ title, done, meta, metaColor, onToggle, onLong
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',

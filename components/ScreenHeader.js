@@ -4,9 +4,10 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 
 export default function ScreenHeader({ title, subtitle }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   return (
     <View style={styles.header}>
       <Text style={styles.title}>{title}</Text>
@@ -15,7 +16,7 @@ export default function ScreenHeader({ title, subtitle }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   header: { marginTop: 12, marginBottom: 18 },
   title: {
     color: COLORS.ink, fontSize: 30, fontWeight: '600',

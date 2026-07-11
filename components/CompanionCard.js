@@ -10,9 +10,10 @@
 
 import React, { useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Animated, Easing, StyleSheet } from 'react-native';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 
 export default function CompanionCard({ notice, onWrite, onDismiss }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   // Arrive gently — a companion shouldn't pounce.
   const inAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -49,7 +50,7 @@ export default function CompanionCard({ notice, onWrite, onDismiss }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   card: {
     backgroundColor: COLORS.panel,
     borderWidth: 1, borderColor: 'rgba(75,54,38,0.22)',

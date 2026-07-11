@@ -1,19 +1,27 @@
 // =====================================================================
 //  Organize — main app
-//  Four tabs: To-dos · Calendar · Habits · Journal.
+//  Six tabs: Home · To-dos · Calendar · Habits · Goals · Journal.
 //
 //  This file is the "brain": it owns all the data (todos, habits,
 //  events, reminders, journal), saves it to the phone, and hands the
 //  data + actions down to each screen as props. The screens only worry
 //  about how things look.
 //
+//  Two sides, one app:
+//    Life — the original coffee-and-cream Organize
+//    Work — "Organize Work", black and metallic silver
+//  To-dos, habits, goals and journals are kept fully separate per side
+//  (stored as { life, work } pairs). Calendar events and reminders are
+//  one shared list — each entry knows its `owner` side and whether it's
+//  `shared` into the other side's calendar.
+//
 //  Coming from Python? useState = a variable React watches;
 //  useEffect = "run this when X changes"; props = function arguments
 //  for components.
 // =====================================================================
 
-import React, { useState, useEffect } from 'react';
-import { View } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, Text, Animated, Easing } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -22,7 +30,7 @@ import { createMaterialTopTabNavigator } from '@react-navigation/material-top-ta
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { COLORS } from './theme';
+import { LIFE, WORK, ThemeContext, SERIF } from './theme';
 import {
   todayKey, addDays, parseKey, weekdayIndex,
   nextOccurrence, currentStreak, weekStreak,
@@ -36,6 +44,7 @@ import GoalsScreen from './screens/GoalsScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 
 // Storage keys. (Habits keep the old "atomic" key so nothing is lost.)
+// Life data stays on the original keys; Work gets its own set.
 const HABITS_KEY = '@atomic_habits_v1';
 const TODOS_V1_KEY = '@organize_todos_v1';
 const TODOS_KEY = '@organize_todos_v2';
@@ -46,21 +55,14 @@ const GOALS_KEY = '@organize_goals_v1';
 const STEPS_KEY = '@organize_steps_v1'; // journal's "one step at a time" entries
 const WELCOME_KEY = '@organize_welcomed_v1';
 const NAME_KEY = '@organize_name';
+const MODE_KEY = '@organize_mode_v1';
+const WORK_HABITS_KEY = '@organize_work_habits_v1';
+const WORK_TODOS_KEY = '@organize_work_todos_v1';
+const WORK_JOURNAL_KEY = '@organize_work_journal_v1';
+const WORK_GOALS_KEY = '@organize_work_goals_v1';
+const WORK_STEPS_KEY = '@organize_work_steps_v1';
 
 const Tab = createMaterialTopTabNavigator();
-
-// Make react-navigation's default surfaces match our cream theme.
-const navTheme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: COLORS.bg,
-    card: COLORS.panel,
-    text: COLORS.ink,
-    border: COLORS.line,
-    primary: COLORS.espresso,
-  },
-};
 
 // ---------------------------------------------------------------------
 //  One-off migrations from the earlier data shapes.
@@ -102,24 +104,45 @@ function migrateHabit(h) {
   return out;
 }
 
+// Events/reminders from before the Life/Work split belong to Life and
+// show in both calendars (sharing is the default).
+function migrateSharedEntry(e) {
+  return e.owner ? e : { ...e, owner: 'life', shared: true };
+}
+
 // The flame means: consecutive days for daily habits, consecutive
 // weeks the target was hit for "n×/week" habits.
 function habitStreak(daySet, target) {
   return target < 7 ? weekStreak(daySet, target) : currentStreak(daySet);
 }
 
+// One-off overnight tidy-up for a to-do list (ticked one-offs vanish).
+function tidyTodos(list) {
+  const today = todayKey();
+  return list.filter((t) => !(t.done && t.completedOn && t.completedOn < today));
+}
+
 export default function App() {
-  const [habits, setHabits] = useState([]);
-  const [todos, setTodos] = useState([]);
+  // Per-side stores: { life, work }.
+  const [habits, setHabits] = useState({ life: [], work: [] });
+  const [todos, setTodos] = useState({ life: [], work: [] });
+  const [journal, setJournal] = useState({ life: {}, work: {} });
+  const [goals, setGoals] = useState({ life: [], work: [] });
+  const [steps, setSteps] = useState({ life: {}, work: {} });
+  // Shared stores: every entry carries { owner: 'life'|'work', shared }.
   const [events, setEvents] = useState([]);
   const [reminders, setReminders] = useState([]);
-  const [journal, setJournal] = useState({});
-  const [goals, setGoals] = useState([]);
-  const [steps, setSteps] = useState({});
+
+  const [mode, setMode] = useState('life');
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
   const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
   const [loaded, setLoaded] = useState(false);
+
+  const palette = mode === 'work' ? WORK : LIFE;
+
+  // Updates one side of a { life, work } store, leaving the other alone.
+  const onSide = (fn) => (prev) => ({ ...prev, [mode]: fn(prev[mode]) });
 
   // --- Load everything once, when the app opens ---
   useEffect(() => {
@@ -128,29 +151,30 @@ export default function App() {
         const pairs = await AsyncStorage.multiGet([
           HABITS_KEY, TODOS_KEY, TODOS_V1_KEY, EVENTS_KEY, REMINDERS_KEY, JOURNAL_KEY,
           GOALS_KEY, STEPS_KEY, WELCOME_KEY, NAME_KEY,
+          MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
+          WORK_GOALS_KEY, WORK_STEPS_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
-        const rawHabits = val(0);
-        if (rawHabits) setHabits(rawHabits.map(migrateHabit));
+        const lifeHabits = (val(0) || []).map(migrateHabit);
+        const workHabits = (val(11) || []).map(migrateHabit);
+        setHabits({ life: lifeHabits, work: workHabits });
 
         // Prefer v2 to-dos; fall back to migrating v1.
         const v2 = val(1);
         const v1 = val(2);
-        let list = v2 || (v1 ? migrateTodosV1(v1) : []);
-        // Overnight tidy-up: one-offs ticked before today disappear.
-        const today = todayKey();
-        list = list.filter((t) => !(t.done && t.completedOn && t.completedOn < today));
-        setTodos(list);
+        const lifeTodos = v2 || (v1 ? migrateTodosV1(v1) : []);
+        setTodos({ life: tidyTodos(lifeTodos), work: tidyTodos(val(12) || []) });
 
-        setEvents(val(3) || []);
-        setReminders(val(4) || []);
-        setJournal(val(5) || {});
-        setGoals(val(6) || []);
-        setSteps(val(7) || {});
-        // Welcome flag + name are plain strings, not JSON.
+        setEvents((val(3) || []).map(migrateSharedEntry));
+        setReminders((val(4) || []).map(migrateSharedEntry));
+        setJournal({ life: val(5) || {}, work: val(13) || {} });
+        setGoals({ life: val(6) || [], work: val(14) || [] });
+        setSteps({ life: val(7) || {}, work: val(15) || {} });
+        // Welcome flag, name and mode are plain strings, not JSON.
         setWelcomed(pairs[8][1] === '1');
         setName(pairs[9][1] || '');
+        setMode(pairs[10][1] === 'work' ? 'work' : 'life');
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -160,48 +184,73 @@ export default function App() {
   }, []);
 
   // --- Save whenever anything changes (but not before loading) ---
+  const save = (key, value) =>
+    AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => {});
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(HABITS_KEY, JSON.stringify(habits)).catch(() => {});
+    save(HABITS_KEY, habits.life); save(WORK_HABITS_KEY, habits.work);
   }, [habits, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(TODOS_KEY, JSON.stringify(todos)).catch(() => {});
+    save(TODOS_KEY, todos.life); save(WORK_TODOS_KEY, todos.work);
   }, [todos, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(EVENTS_KEY, JSON.stringify(events)).catch(() => {});
+    save(EVENTS_KEY, events);
   }, [events, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(REMINDERS_KEY, JSON.stringify(reminders)).catch(() => {});
+    save(REMINDERS_KEY, reminders);
   }, [reminders, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(JOURNAL_KEY, JSON.stringify(journal)).catch(() => {});
+    save(JOURNAL_KEY, journal.life); save(WORK_JOURNAL_KEY, journal.work);
   }, [journal, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(GOALS_KEY, JSON.stringify(goals)).catch(() => {});
+    save(GOALS_KEY, goals.life); save(WORK_GOALS_KEY, goals.work);
   }, [goals, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    AsyncStorage.setItem(STEPS_KEY, JSON.stringify(steps)).catch(() => {});
+    save(STEPS_KEY, steps.life); save(WORK_STEPS_KEY, steps.work);
   }, [steps, loaded]);
+
+  // ================= Switching sides =================
+
+  // A full-screen veil in the target side's colours fades in, the mark
+  // blooms, the app re-themes underneath, and the veil lifts.
+  const switchAnim = useRef(new Animated.Value(0)).current;
+  const [switchTarget, setSwitchTarget] = useState(null);
+
+  function switchMode() {
+    const target = mode === 'life' ? 'work' : 'life';
+    setSwitchTarget(target);
+    Animated.timing(switchAnim, {
+      toValue: 1, duration: 340,
+      easing: Easing.in(Easing.cubic), useNativeDriver: true,
+    }).start(() => {
+      setMode(target);
+      AsyncStorage.setItem(MODE_KEY, target).catch(() => {});
+      Animated.timing(switchAnim, {
+        toValue: 0, duration: 480, delay: 260,
+        easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }).start(() => setSwitchTarget(null));
+    });
+  }
 
   // ================= Habit actions =================
 
-  function addHabit(name, target = 7) {
-    setHabits((prev) => [...prev, {
-      id: Date.now().toString(), name, target,
+  function addHabit(habitName, target = 7) {
+    setHabits(onSide((list) => [...list, {
+      id: Date.now().toString(), name: habitName, target,
       streak: 0, lastDone: null, history: [],
-    }]);
+    }]));
   }
 
   function toggleHabit(id) {
     const today = todayKey();
-    setHabits((prev) =>
-      prev.map((h) => {
+    setHabits(onSide((list) =>
+      list.map((h) => {
         if (h.id !== id) return h;
         const days = new Set(h.history || []);
         if (days.has(today)) days.delete(today);
@@ -213,11 +262,11 @@ export default function App() {
           lastDone: history[history.length - 1] || null,
         };
       })
-    );
+    ));
   }
 
   function deleteHabit(id) {
-    setHabits((prev) => prev.filter((h) => h.id !== id));
+    setHabits(onSide((list) => list.filter((h) => h.id !== id)));
   }
 
   // ================= To-do actions =================
@@ -225,18 +274,18 @@ export default function App() {
   // options = { title, deadline, repeat }
   function addTodo({ title, deadline, repeat }) {
     const today = todayKey();
-    setTodos((prev) => [...prev, {
+    setTodos(onSide((list) => [...list, {
       id: Date.now().toString(), title,
       deadline: deadline || null,
       repeat: repeat || null,
       nextDue: repeat ? nextOccurrence(repeat, today) : null,
       done: false, completedOn: null,
-    }]);
+    }]));
   }
 
   function toggleTodo(id) {
     const today = todayKey();
-    setTodos((prev) => prev.map((t) => {
+    setTodos(onSide((list) => list.map((t) => {
       if (t.id !== id) return t;
 
       if (t.repeat) {
@@ -254,63 +303,74 @@ export default function App() {
       return t.done
         ? { ...t, done: false, completedOn: null }
         : { ...t, done: true, completedOn: today };
-    }));
+    })));
   }
 
   function deleteTodo(id) {
-    setTodos((prev) => prev.filter((t) => t.id !== id));
+    setTodos(onSide((list) => list.filter((t) => t.id !== id)));
   }
 
   // ================= Event & reminder actions =================
+  //  Entries are born on the current side (`owner: mode`). `shared`
+  //  (default true) also shows them in the other side's calendar.
 
-  function addEvent({ title, date, time }) {
+  function addEvent({ title, date, time, shared }) {
     setEvents((prev) => [...prev, {
       id: Date.now().toString(), title, date, time: time || null,
+      owner: mode, shared: shared !== false,
     }]);
   }
   function deleteEvent(id) {
     setEvents((prev) => prev.filter((e) => e.id !== id));
   }
+  // "Remove from this calendar" on the side that doesn't own it.
+  function unshareEvent(id) {
+    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, shared: false } : e)));
+  }
 
-  function addReminder({ title, date, yearly }) {
+  function addReminder({ title, date, yearly, shared }) {
     setReminders((prev) => [...prev, {
       id: Date.now().toString(), title, date, yearly: !!yearly,
+      owner: mode, shared: shared !== false,
     }]);
   }
   function deleteReminder(id) {
     setReminders((prev) => prev.filter((r) => r.id !== id));
   }
+  function unshareReminder(id) {
+    setReminders((prev) => prev.map((r) => (r.id === id ? { ...r, shared: false } : r)));
+  }
 
   // ================= Journal actions =================
 
   function saveEntry(key, { text, mood }) {
-    setJournal((prev) => ({ ...prev, [key]: { text, mood: mood || null } }));
+    setJournal(onSide((entries) => ({ ...entries, [key]: { text, mood: mood || null } })));
   }
   function deleteEntry(key) {
-    setJournal((prev) => {
-      const next = { ...prev };
+    setJournal(onSide((entries) => {
+      const next = { ...entries };
       delete next[key];
       return next;
-    });
+    }));
   }
 
   // "One step at a time" entries — the journal's goals side.
   function saveStep(key, text) {
-    setSteps((prev) => ({ ...prev, [key]: { text } }));
+    setSteps(onSide((entries) => ({ ...entries, [key]: { text } })));
   }
   function deleteStep(key) {
-    setSteps((prev) => {
-      const next = { ...prev };
+    setSteps(onSide((entries) => {
+      const next = { ...entries };
       delete next[key];
       return next;
-    });
+    }));
   }
 
   // ================= Goal actions =================
 
   // goal = { title, specific, why, milestones: [text], targetDate }
   function addGoal({ title, specific, why, milestones, targetDate }) {
-    setGoals((prev) => [...prev, {
+    setGoals(onSide((list) => [...list, {
       id: Date.now().toString(), title,
       specific: specific || '', why: why || '',
       milestones: milestones.map((text, i) => ({
@@ -318,18 +378,18 @@ export default function App() {
       })),
       targetDate: targetDate || null,
       createdOn: todayKey(), achievedOn: null,
-    }]);
+    }]));
   }
 
   // Flesh a goal out after the fact — "make it more SMART".
   function updateGoal(goalId, fields) {
-    setGoals((prev) => prev.map((g) =>
+    setGoals(onSide((list) => list.map((g) =>
       g.id === goalId ? { ...g, ...fields } : g
-    ));
+    )));
   }
 
   function toggleMilestone(goalId, milestoneId) {
-    setGoals((prev) => prev.map((g) => {
+    setGoals(onSide((list) => list.map((g) => {
       if (g.id !== goalId) return g;
       return {
         ...g,
@@ -337,17 +397,17 @@ export default function App() {
           m.id === milestoneId ? { ...m, done: !m.done } : m
         ),
       };
-    }));
+    })));
   }
 
   function markGoalAchieved(goalId) {
-    setGoals((prev) => prev.map((g) =>
+    setGoals(onSide((list) => list.map((g) =>
       g.id === goalId ? { ...g, achievedOn: g.achievedOn ? null : todayKey() } : g
-    ));
+    )));
   }
 
   function deleteGoal(goalId) {
-    setGoals((prev) => prev.filter((g) => g.id !== goalId));
+    setGoals(onSide((list) => list.filter((g) => g.id !== goalId)));
   }
 
   // ================= Welcome =================
@@ -366,8 +426,8 @@ export default function App() {
     AsyncStorage.setItem(NAME_KEY, newName).catch(() => {});
   }
 
-  // Wipe everything — storage and state — and return to the welcome
-  // flow, exactly like a fresh install.
+  // Wipe everything — storage and state, both sides — and return to the
+  // welcome flow, exactly like a fresh install.
   async function resetAllData() {
     try {
       const keys = await AsyncStorage.getAllKeys();
@@ -376,9 +436,12 @@ export default function App() {
         keys.filter((k) => k.startsWith('@organize_') || k.startsWith('@atomic_'))
       );
     } catch (e) {}
-    setHabits([]); setTodos([]); setEvents([]); setReminders([]);
-    setJournal({}); setGoals([]); setSteps({});
+    setHabits({ life: [], work: [] }); setTodos({ life: [], work: [] });
+    setJournal({ life: {}, work: {} }); setGoals({ life: [], work: [] });
+    setSteps({ life: {}, work: {} });
+    setEvents([]); setReminders([]);
     setJournalSeed(null); setName('');
+    setMode('life');
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -393,10 +456,24 @@ export default function App() {
     'Journal': 'book-outline',
   };
 
-  // Hold on the cream background until storage has answered — avoids
+  // Make react-navigation's default surfaces match the active side.
+  const navTheme = useMemo(() => ({
+    ...DefaultTheme,
+    dark: palette.mode === 'work',
+    colors: {
+      ...DefaultTheme.colors,
+      background: palette.bg,
+      card: palette.panel,
+      text: palette.ink,
+      border: palette.line,
+      primary: palette.espresso,
+    },
+  }), [palette]);
+
+  // Hold on the plain background until storage has answered — avoids
   // flashing the tabs at a first-time user (or the welcome at a regular).
   if (!loaded) {
-    return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />;
+    return <View style={{ flex: 1, backgroundColor: LIFE.bg }} />;
   }
 
   if (!welcomed) {
@@ -408,121 +485,189 @@ export default function App() {
     );
   }
 
+  const veilPalette = switchTarget === 'work' ? WORK : LIFE;
+
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
-      {/* bottom edge padded here so the tab bar clears the home indicator */}
-      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.panel }} edges={['bottom']}>
-        <NavigationContainer theme={navTheme}>
-          <Tab.Navigator
-            tabBarPosition="bottom"
-            screenOptions={({ route }) => ({
-              swipeEnabled: true,
-              lazy: true,
-              tabBarShowIcon: true,
-              tabBarActiveTintColor: COLORS.espresso,
-              tabBarInactiveTintColor: COLORS.muted2,
-              tabBarStyle: {
-                backgroundColor: COLORS.panel,
-                borderTopWidth: 1,
-                borderTopColor: COLORS.line,
-                elevation: 0,
-                shadowOpacity: 0,
-              },
-              tabBarItemStyle: { paddingVertical: 7, paddingHorizontal: 0 },
-              tabBarLabelStyle: {
-                fontSize: 9.5, fontWeight: '600', textTransform: 'none',
-                marginTop: 2, marginHorizontal: 0,
-              },
-              tabBarIconStyle: { width: 24, height: 24, alignSelf: 'center' },
-              // the little espresso line rides along as you swipe
-              tabBarIndicatorStyle: { backgroundColor: COLORS.espresso, height: 2, top: 0 },
-              tabBarPressColor: 'rgba(75,54,38,0.12)',
-              tabBarIcon: ({ color }) => (
-                <Ionicons name={ICONS[route.name]} size={21} color={color} />
-              ),
-            })}
+      <ThemeContext.Provider value={palette}>
+        <StatusBar style={palette.mode === 'work' ? 'light' : 'dark'} />
+        {/* bottom edge padded here so the tab bar clears the home indicator */}
+        <SafeAreaView
+          key={mode} /* remount so every static piece re-themes cleanly */
+          style={{ flex: 1, backgroundColor: palette.panel }}
+          edges={['bottom']}
+        >
+          <NavigationContainer theme={navTheme}>
+            <Tab.Navigator
+              tabBarPosition="bottom"
+              screenOptions={({ route }) => ({
+                swipeEnabled: true,
+                lazy: true,
+                tabBarShowIcon: true,
+                tabBarActiveTintColor: palette.espresso,
+                tabBarInactiveTintColor: palette.muted2,
+                tabBarStyle: {
+                  backgroundColor: palette.panel,
+                  borderTopWidth: 1,
+                  borderTopColor: palette.line,
+                  elevation: 0,
+                  shadowOpacity: 0,
+                },
+                tabBarItemStyle: { paddingVertical: 7, paddingHorizontal: 0 },
+                tabBarLabelStyle: {
+                  fontSize: 9.5, fontWeight: '600', textTransform: 'none',
+                  marginTop: 2, marginHorizontal: 0,
+                },
+                tabBarIconStyle: { width: 24, height: 24, alignSelf: 'center' },
+                // the little accent line rides along as you swipe
+                tabBarIndicatorStyle: { backgroundColor: palette.espresso, height: 2, top: 0 },
+                tabBarPressColor: palette.line,
+                tabBarIcon: ({ color }) => (
+                  <Ionicons name={ICONS[route.name]} size={21} color={color} />
+                ),
+              })}
+            >
+            <Tab.Screen name="Home">
+              {() => (
+                <HomeScreen
+                  name={name}
+                  mode={mode}
+                  habits={habits[mode]}
+                  todos={todos[mode]}
+                  events={events}
+                  reminders={reminders}
+                  journal={journal[mode]}
+                  toggleTodo={toggleTodo}
+                  onSeedJournal={setJournalSeed}
+                  onUpdateName={updateName}
+                  onResetAll={resetAllData}
+                  onSwitchMode={switchMode}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="To-dos">
+              {() => (
+                <TodosScreen
+                  todos={todos[mode]}
+                  addTodo={addTodo}
+                  toggleTodo={toggleTodo}
+                  deleteTodo={deleteTodo}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="Calendar">
+              {() => (
+                <CalendarScreen
+                  mode={mode}
+                  todos={todos[mode]}
+                  toggleTodo={toggleTodo}
+                  events={events}
+                  addEvent={addEvent}
+                  deleteEvent={deleteEvent}
+                  unshareEvent={unshareEvent}
+                  reminders={reminders}
+                  addReminder={addReminder}
+                  deleteReminder={deleteReminder}
+                  unshareReminder={unshareReminder}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="Habits">
+              {() => (
+                <HabitsScreen
+                  habits={habits[mode]}
+                  addHabit={addHabit}
+                  toggleHabit={toggleHabit}
+                  deleteHabit={deleteHabit}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="Goals">
+              {() => (
+                <GoalsScreen
+                  goals={goals[mode]}
+                  addGoal={addGoal}
+                  updateGoal={updateGoal}
+                  toggleMilestone={toggleMilestone}
+                  markGoalAchieved={markGoalAchieved}
+                  deleteGoal={deleteGoal}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="Journal">
+              {() => (
+                <JournalScreen
+                  journal={journal[mode]}
+                  saveEntry={saveEntry}
+                  deleteEntry={deleteEntry}
+                  steps={steps[mode]}
+                  saveStep={saveStep}
+                  deleteStep={deleteStep}
+                  goals={goals[mode]}
+                  journalSeed={journalSeed}
+                  onSeedConsumed={() => setJournalSeed(null)}
+                />
+              )}
+            </Tab.Screen>
+            </Tab.Navigator>
+          </NavigationContainer>
+        </SafeAreaView>
+
+        {/* ---- the switching veil ---- */}
+        {switchTarget && (
+          <Animated.View
+            pointerEvents="auto"
+            style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: veilPalette.bg,
+              alignItems: 'center', justifyContent: 'center',
+              opacity: switchAnim,
+            }}
           >
-          <Tab.Screen name="Home">
-            {() => (
-              <HomeScreen
-                name={name}
-                habits={habits}
-                todos={todos}
-                events={events}
-                reminders={reminders}
-                journal={journal}
-                toggleTodo={toggleTodo}
-                onSeedJournal={setJournalSeed}
-                onUpdateName={updateName}
-                onResetAll={resetAllData}
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="To-dos">
-            {() => (
-              <TodosScreen
-                todos={todos}
-                addTodo={addTodo}
-                toggleTodo={toggleTodo}
-                deleteTodo={deleteTodo}
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="Calendar">
-            {() => (
-              <CalendarScreen
-                todos={todos}
-                toggleTodo={toggleTodo}
-                events={events}
-                addEvent={addEvent}
-                deleteEvent={deleteEvent}
-                reminders={reminders}
-                addReminder={addReminder}
-                deleteReminder={deleteReminder}
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="Habits">
-            {() => (
-              <HabitsScreen
-                habits={habits}
-                addHabit={addHabit}
-                toggleHabit={toggleHabit}
-                deleteHabit={deleteHabit}
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="Goals">
-            {() => (
-              <GoalsScreen
-                goals={goals}
-                addGoal={addGoal}
-                updateGoal={updateGoal}
-                toggleMilestone={toggleMilestone}
-                markGoalAchieved={markGoalAchieved}
-                deleteGoal={deleteGoal}
-              />
-            )}
-          </Tab.Screen>
-          <Tab.Screen name="Journal">
-            {() => (
-              <JournalScreen
-                journal={journal}
-                saveEntry={saveEntry}
-                deleteEntry={deleteEntry}
-                steps={steps}
-                saveStep={saveStep}
-                deleteStep={deleteStep}
-                goals={goals}
-                journalSeed={journalSeed}
-                onSeedConsumed={() => setJournalSeed(null)}
-              />
-            )}
-          </Tab.Screen>
-          </Tab.Navigator>
-        </NavigationContainer>
-      </SafeAreaView>
+            <Animated.View
+              style={{
+                alignItems: 'center',
+                transform: [{
+                  scale: switchAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }),
+                }],
+              }}
+            >
+              <VeilMark colors={veilPalette} />
+              <Text style={{
+                marginTop: 22, fontSize: 24, fontFamily: SERIF,
+                color: veilPalette.ink, fontWeight: '600', letterSpacing: 0.3,
+              }}>
+                Organize
+                {switchTarget === 'work' && (
+                  <Text style={{ fontStyle: 'italic', color: veilPalette.espressoLight }}> Work</Text>
+                )}
+                {switchTarget === 'life' && (
+                  <Text style={{ fontStyle: 'italic', color: veilPalette.espressoLight }}> Life</Text>
+                )}
+              </Text>
+            </Animated.View>
+          </Animated.View>
+        )}
+      </ThemeContext.Provider>
     </SafeAreaProvider>
+  );
+}
+
+// The 2×2 stacked-squares mark, drawn in the veil's colours.
+function VeilMark({ colors, size = 30, gap = 8 }) {
+  const sq = (filled) => ({
+    width: size, height: size, borderRadius: size * 0.28,
+    borderWidth: 2.5, borderColor: colors.espresso,
+    backgroundColor: filled ? colors.espresso : 'transparent',
+  });
+  return (
+    <View style={{ width: size * 2 + gap, height: size * 2 + gap }}>
+      <View style={{ flexDirection: 'row', gap, marginBottom: gap }}>
+        <View style={sq(true)} /><View style={sq(false)} />
+      </View>
+      <View style={{ flexDirection: 'row', gap }}>
+        <View style={sq(false)} /><View style={sq(false)} />
+      </View>
+    </View>
   );
 }

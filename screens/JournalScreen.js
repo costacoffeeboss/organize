@@ -11,7 +11,7 @@ import {
   KeyboardAvoidingView, Platform, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 import { todayKey, niceDate, currentStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
@@ -42,6 +42,7 @@ export default function JournalScreen({
   steps, saveStep, deleteStep, goals,
   journalSeed, onSeedConsumed,
 }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
   const [part, setPart] = useState('today'); // 'today' | 'goals'
   const [editingKey, setEditingKey] = useState(null); // day being written/read
@@ -343,7 +344,7 @@ export default function JournalScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
   segment: {

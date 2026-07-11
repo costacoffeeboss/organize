@@ -12,11 +12,12 @@
 import React, { useRef, useEffect } from 'react';
 import { View, Animated, Easing, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
-import { COLORS } from '../theme';
+import { useThemedStyles } from '../theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export default function ProgressRing({ percent, size = 86, stroke = 9, children }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
 
@@ -54,7 +55,7 @@ export default function ProgressRing({ percent, size = 86, stroke = 9, children 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   center: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center', justifyContent: 'center',

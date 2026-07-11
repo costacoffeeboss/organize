@@ -15,7 +15,7 @@ import {
   Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 import {
   todayKey, addDays, currentStreak, bestStreak, weekStartKey, countInWeek,
   WEEKDAY_LETTERS,
@@ -31,6 +31,7 @@ import FAB from '../components/FAB';
 // target; hitting the target plays a small celebration on the row.
 // Module-level so animations survive parent re-renders.
 function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const done = habit.lastDone === today;
   const days = new Set(habit.history || []);
   const target = habit.target || 7;
@@ -137,6 +138,7 @@ function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
 }
 
 export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const [showAdd, setShowAdd] = useState(false);
   const [newHabit, setNewHabit] = useState('');
   const [newTarget, setNewTarget] = useState(7); // times per week
@@ -309,7 +311,7 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
 
   ringCard: {

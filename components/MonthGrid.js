@@ -17,10 +17,11 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { COLORS } from '../theme';
+import { useThemedStyles } from '../theme';
 import { monthCells, todayKey, WEEKDAY_LETTERS } from '../utils/dates';
 
 export default function MonthGrid({ year, month, selected, onSelect, dots, filled, maxKey }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const cells = monthCells(year, month);
   const today = todayKey();
 
@@ -78,7 +79,7 @@ export default function MonthGrid({ year, month, selected, onSelect, dots, fille
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   week: { flexDirection: 'row', marginBottom: 6 },
   weekday: {
     flexBasis: '14.28%', textAlign: 'center',

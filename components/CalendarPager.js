@@ -9,11 +9,12 @@
 
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { COLORS, SERIF } from '../theme';
+import { useThemedStyles, SERIF } from '../theme';
 import { monthLabel, parseKey, todayKey } from '../utils/dates';
 import MonthGrid from './MonthGrid';
 
 export default function CalendarPager({ initialKey, ...gridProps }) {
+  const { COLORS, styles } = useThemedStyles(makeStyles);
   const start = parseKey(initialKey || todayKey());
   const [year, setYear] = useState(start.getFullYear());
   const [month, setMonth] = useState(start.getMonth()); // 0-based
@@ -43,7 +44,7 @@ export default function CalendarPager({ initialKey, ...gridProps }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   head: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 8,
