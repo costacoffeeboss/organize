@@ -39,13 +39,15 @@ const PROMPTS = [
 
 const STEP_PROMPT = 'One step at a time — what step did you take today?';
 
-// The guided-journal format, editable in the tab's settings cog.
+// The guided-journal format, editable in the tab's settings cog. The
+// titles are laid onto the page as headings — one open page, so the
+// finished entry reads as a single piece.
 export const DEFAULT_GUIDED_SECTIONS = [
-  { id: 'gratitude', title: 'Gratitude', prompt: 'List 5 things you feel grateful for today.' },
-  { id: 'well', title: 'What went well today?', prompt: 'Big or small — what worked?' },
-  { id: 'improve', title: 'What could be improved?', prompt: 'Be honest, not harsh.' },
-  { id: 'action', title: 'How will you go about that improvement?', prompt: 'One concrete thing.' },
-  { id: 'free', title: 'Free thoughts', prompt: 'Anything else on your mind.' },
+  { id: 'gratitude', title: 'Gratitude — five things from today' },
+  { id: 'well', title: 'What went well today?' },
+  { id: 'improve', title: 'What could be improved?' },
+  { id: 'action', title: 'How will you go about that improvement?' },
+  { id: 'free', title: 'Free thoughts' },
 ];
 
 export default function JournalScreen({
@@ -67,9 +69,10 @@ export default function JournalScreen({
   // --- Guided journaling ---
   const [showPrefs, setShowPrefs] = useState(false);
   const [newSection, setNewSection] = useState('');
-  const [guidedMode, setGuidedMode] = useState(false);     // this composer session
-  const [composerSections, setComposerSections] = useState([]);
-  const [guidedDraft, setGuidedDraft] = useState({});      // title -> text
+
+  // The headings, pre-laid on the page with room to write under each.
+  const guidedTemplate = () =>
+    guidedSections.map((s) => `${s.title}\n\n`).join('\n');
 
   const entryDays = new Set(Object.keys(journal));
   const streak = currentStreak(entryDays);
@@ -115,45 +118,19 @@ export default function JournalScreen({
     const existing = journal[key];
     setMood(existing ? existing.mood : null);
     setSeedPrompt(seed);
-
-    // Guided composer for new entries and guided ones; entries written
-    // as plain pages stay plain pages.
-    const guided = guidedOn && (!existing || existing.guided);
-    setGuidedMode(guided);
-    if (guided) {
-      // Current format, plus any sections an older entry used that have
-      // since been removed — nothing gets lost.
-      const extras = (existing?.guided || [])
-        .filter((s) => !guidedSections.some((g) => g.title === s.title))
-        .map((s) => ({ id: `old-${s.title}`, title: s.title, prompt: '' }));
-      setComposerSections([...guidedSections, ...extras]);
-      const drafts = {};
-      (existing?.guided || []).forEach((s) => { drafts[s.title] = s.text; });
-      setGuidedDraft(drafts);
-      setDraft('');
-    } else {
-      setDraft(existing ? existing.text : '');
-    }
+    // New entries start from the guided headings (unless the companion
+    // sent a question over); existing entries open exactly as written.
+    setDraft(existing ? existing.text : (guidedOn && !seed ? guidedTemplate() : ''));
     setEditingKey(key);
   }
 
-  const guidedHasText = Object.values(guidedDraft).some((t) => (t || '').trim());
-  const canSave = guidedMode ? guidedHasText : !!draft.trim();
+  // An untouched sheet of headings isn't an entry yet.
+  const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const canSave = !!draft.trim() && (!guidedOn || squash(draft) !== squash(guidedTemplate()));
 
   function onSave() {
-    if (guidedMode) {
-      const filled = composerSections
-        .map((s) => ({ title: s.title, text: (guidedDraft[s.title] || '').trim() }))
-        .filter((s) => s.text);
-      if (filled.length) {
-        // Compiled text keeps previews (Home card, day list) working.
-        const text = filled.map((s) => `${s.title}\n${s.text}`).join('\n\n');
-        saveEntry(editingKey, { text, mood, guided: filled });
-      }
-    } else {
-      const text = draft.trim();
-      if (text) saveEntry(editingKey, { text, mood });
-    }
+    const text = draft.trim();
+    if (text) saveEntry(editingKey, { text, mood });
     setEditingKey(null);
   }
 
@@ -292,7 +269,7 @@ export default function JournalScreen({
             <View style={{ flex: 1 }}>
               <Text style={styles.prefTitle}>Guided journaling</Text>
               <Text style={styles.prefHint}>
-                Structured sections instead of a blank page.
+                New entries start with your section headings laid on the page.
               </Text>
             </View>
             <View style={[styles.toggle, guidedOn && styles.toggleOn]}>
@@ -385,52 +362,24 @@ export default function JournalScreen({
               ))}
             </View>
 
-            {/* The page itself. Guided mode lays out one soft box per
-                section; otherwise the whole page is for free writing.
-                If the companion asked something, its question is the prompt. */}
-            {guidedMode ? (
-              <ScrollView
-                style={{ flex: 1 }}
-                contentContainerStyle={styles.guidedWrap}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {composerSections.map((s) => (
-                  <View key={s.id} style={styles.guidedSection}>
-                    <Text style={styles.guidedTitle}>{s.title}</Text>
-                    <TextInput
-                      style={styles.guidedInput}
-                      placeholder={s.prompt || 'Write freely…'}
-                      placeholderTextColor={COLORS.muted2}
-                      value={guidedDraft[s.title] || ''}
-                      onChangeText={(t) => setGuidedDraft((prev) => ({ ...prev, [s.title]: t }))}
-                      multiline
-                      textAlignVertical="top"
-                    />
-                  </View>
-                ))}
-                {journal[editingKey] && (
-                  <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
-                    <Text style={styles.deleteBtn}>Delete entry</Text>
-                  </TouchableOpacity>
-                )}
-              </ScrollView>
-            ) : (
-              <TextInput
-                style={styles.page}
-                placeholder={seedPrompt || prompt}
-                placeholderTextColor={COLORS.muted2}
-                value={draft}
-                onChangeText={setDraft}
-                multiline
-                textAlignVertical="top"
-                autoFocus
-                scrollEnabled
-              />
-            )}
+            {/* The page itself — all remaining space is one open sheet.
+                With guided journaling on, the section headings are
+                already laid on it, ready to be written under. If the
+                companion asked something, its question is the prompt. */}
+            <TextInput
+              style={styles.page}
+              placeholder={seedPrompt || prompt}
+              placeholderTextColor={COLORS.muted2}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              textAlignVertical="top"
+              autoFocus
+              scrollEnabled
+            />
 
-            {/* Delete lives quietly at the foot of existing plain entries */}
-            {!guidedMode && journal[editingKey] && (
+            {/* Delete lives quietly at the foot of existing entries */}
+            {journal[editingKey] && (
               <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
                 <Text style={styles.deleteBtn}>Delete entry</Text>
               </TouchableOpacity>
@@ -554,18 +503,6 @@ const makeStyles = (COLORS) => StyleSheet.create({
     textAlign: 'center', paddingVertical: 12,
   },
 
-  // --- guided composer ---
-  guidedWrap: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
-  guidedSection: { marginBottom: 16 },
-  guidedTitle: {
-    color: COLORS.ink, fontSize: 16, fontWeight: '600', fontFamily: SERIF,
-    marginBottom: 7,
-  },
-  guidedInput: {
-    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
-    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11,
-    color: COLORS.ink, fontSize: 15, lineHeight: 22, minHeight: 84,
-  },
 
   segment: {
     flexDirection: 'row', backgroundColor: COLORS.panelDeep,
