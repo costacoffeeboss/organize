@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
+import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
   currentStreak,
@@ -74,8 +75,9 @@ function SwitchMark({ target, onPress }) {
 }
 
 export default function HomeScreen({
-  name, mode, habits, todos, events, reminders, journal, toggleTodo,
+  name, mode, habits, todos, events, deviceEvents, reminders, journal, toggleTodo,
   onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
+  deviceCalOn, onToggleDeviceCal, notifyOn, onToggleNotify,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const navigation = useNavigation();
@@ -150,9 +152,10 @@ export default function HomeScreen({
   // Calendar entries are shared stores: show ours, plus anything the
   // other side shared across. Foreign entries keep their side's colours.
   const visible = (x) => x.owner === mode || x.shared;
-  const dayEvents = events
-    .filter((e) => visible(e) && e.date === today)
-    .sort((a, b) => ((a.time || '') < (b.time || '') ? -1 : 1));
+  const dayEvents = [
+    ...events.filter((e) => visible(e) && e.date === today),
+    ...deviceEvents.filter((e) => e.date === today), // the phone's own, in grey
+  ].sort((a, b) => ((a.time || '') < (b.time || '') ? -1 : 1));
   const dayReminders = reminders.filter((r) => visible(r) && reminderOccursOn(r, today));
   const overdueTodos = todos.filter((t) => !t.repeat && !t.done && t.deadline && t.deadline < today);
   const dueTodos = todos.filter((t) =>
@@ -169,7 +172,8 @@ export default function HomeScreen({
   // Dot colours: our own entries use the accent; the other side's use
   // its signature surface so they're unmistakable at a glance.
   const eventDot = (e) =>
-    e.owner === mode ? COLORS.espresso : paletteFor(e.owner).crema;
+    e.device ? DEVICE_GREY
+      : e.owner === mode ? COLORS.espresso : paletteFor(e.owner).crema;
   const reminderDot = (r) =>
     r.owner === mode ? COLORS.gold : paletteFor(r.owner).crema;
 
@@ -367,6 +371,26 @@ export default function HomeScreen({
             </TouchableOpacity>
           </View>
 
+          <Text style={[styles.settingsLabel, { marginTop: 20 }]}>Extras</Text>
+          <TouchableOpacity style={styles.prefRow} onPress={onToggleDeviceCal} activeOpacity={0.75}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prefTitle}>Show phone calendar</Text>
+              <Text style={styles.prefHint}>Your iPhone's events appear in grey, read-only.</Text>
+            </View>
+            <View style={[styles.toggle, deviceCalOn && styles.toggleOn]}>
+              <View style={[styles.knob, deviceCalOn && styles.knobOn]} />
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.prefRow} onPress={onToggleNotify} activeOpacity={0.75}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prefTitle}>Morning digest</Text>
+              <Text style={styles.prefHint}>One notification at 8:00 on days with events.</Text>
+            </View>
+            <View style={[styles.toggle, notifyOn && styles.toggleOn]}>
+              <View style={[styles.knob, notifyOn && styles.knobOn]} />
+            </View>
+          </TouchableOpacity>
+
           <View style={styles.dangerZone}>
             <Text style={styles.dangerLabel}>Danger zone</Text>
             <TouchableOpacity style={styles.dangerBtn} onPress={confirmReset}>
@@ -411,6 +435,21 @@ const makeStyles = (COLORS) => StyleSheet.create({
     paddingHorizontal: 18, justifyContent: 'center',
   },
   saveBtnText: { color: COLORS.bg, fontSize: 14.5, fontWeight: '700' },
+
+  prefRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 12, marginBottom: 10,
+  },
+  prefTitle: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
+  prefHint: { color: COLORS.muted2, fontSize: 12, marginTop: 2 },
+  toggle: {
+    width: 46, height: 28, borderRadius: 14, padding: 3,
+    backgroundColor: COLORS.mode === 'work' ? 'rgba(201,205,214,0.15)' : 'rgba(59,44,30,0.15)',
+  },
+  toggleOn: { backgroundColor: COLORS.espresso },
+  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.panel },
+  knobOn: { marginLeft: 18 },
 
   dangerZone: {
     marginTop: 22, paddingTop: 16,

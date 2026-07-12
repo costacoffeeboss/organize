@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
+import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, monthLabel, shortDate, monthCells, repeatOccursOn,
   reminderOccursOn, weekStartKey, addDays, parseKey, WEEKDAY_LETTERS,
@@ -35,7 +36,7 @@ const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
 
 export default function CalendarScreen({
-  mode, todos, toggleTodo, events, addEvent, deleteEvent, unshareEvent,
+  mode, todos, toggleTodo, events, deviceEvents, addEvent, deleteEvent, unshareEvent,
   reminders, addReminder, deleteReminder, unshareReminder,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
@@ -104,9 +105,11 @@ export default function CalendarScreen({
     );
   }
   function eventsOn(key) {
-    return events
-      .filter((e) => visible(e) && e.date === key)
-      .sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1); // all-day first
+    return [
+      ...events.filter((e) => visible(e) && e.date === key),
+      // the phone's own events, mirrored read-only in neutral grey
+      ...deviceEvents.filter((e) => e.date === key),
+    ].sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1); // all-day first
   }
   function remindersOn(key) {
     return reminders.filter((r) => visible(r) && reminderOccursOn(r, key));
@@ -115,7 +118,7 @@ export default function CalendarScreen({
   // Everything on a day, in ribbon order: events, reminders, to-dos.
   function itemsOn(key) {
     return [
-      ...eventsOn(key).map((e) => ({ id: `e${e.id}`, kind: 'event', title: e.title, time: e.time, owner: e.owner })),
+      ...eventsOn(key).map((e) => ({ id: `e${e.id}`, kind: 'event', title: e.title, time: e.time, owner: e.owner, device: e.device })),
       ...remindersOn(key).map((r) => ({ id: `r${r.id}`, kind: 'reminder', title: r.title, owner: r.owner })),
       ...todosOn(key).map((t) => ({ id: `t${t.id}`, kind: 'todo', title: t.title, owner: mode })),
     ];
@@ -126,6 +129,7 @@ export default function CalendarScreen({
   // Small dots: our entries keep espresso/gold; theirs wear their side's
   // signature surface (black graphite in Life, warm cream in Work).
   const dotFor = (it) => {
+    if (it.device) return DEVICE_GREY;
     if (foreign(it.owner)) return paletteFor(it.owner).crema;
     return it.kind === 'event' ? COLORS.espresso
       : it.kind === 'reminder' ? COLORS.gold : COLORS.muted2;
@@ -167,11 +171,12 @@ export default function CalendarScreen({
     const d = [];
     const ev = eventsOn(cell.key);
     const rem = remindersOn(cell.key);
-    if (ev.some((e) => !foreign(e.owner))) d.push(COLORS.espresso);
+    if (ev.some((e) => !e.device && !foreign(e.owner))) d.push(COLORS.espresso);
     if (rem.some((r) => !foreign(r.owner))) d.push(COLORS.gold);
-    if ([...ev, ...rem].some((x) => foreign(x.owner))) {
+    if ([...ev, ...rem].some((x) => !x.device && foreign(x.owner))) {
       d.push(paletteFor(mode === 'life' ? 'work' : 'life').crema);
     }
+    if (ev.some((e) => e.device)) d.push(DEVICE_GREY);
     if (todosOn(cell.key).length) d.push(COLORS.muted2);
     if (d.length) dots[cell.key] = d;
   });
@@ -191,7 +196,14 @@ export default function CalendarScreen({
 
   // Long-press on a shared entry from the other side: the gentle option
   // just removes it from this calendar; deleting everywhere is explicit.
+  // Phone events are read-only — point at the phone's calendar app.
   function confirmRemove(label, item, deleteFn, unshareFn) {
+    if (item.device) {
+      Alert.alert(
+        'From your phone',
+        "This event lives in your phone's calendar — edit or delete it there.");
+      return;
+    }
     if (!foreign(item.owner)) {
       confirmDelete(label, () => deleteFn(item.id));
       return;
@@ -257,9 +269,11 @@ export default function CalendarScreen({
                 onLongPress={() => confirmRemove('event', e, deleteEvent, unshareEvent)}
                 activeOpacity={0.8}
               >
-                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'event', owner: e.owner }) }]} />
+                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'event', owner: e.owner, device: e.device }) }]} />
                 <Text style={styles.itemTitle} numberOfLines={2}>{e.title}</Text>
-                {foreign(e.owner) && (
+                {e.device ? (
+                  <Text style={styles.ownerTag}>Phone</Text>
+                ) : foreign(e.owner) && (
                   <Text style={styles.ownerTag}>{e.owner === 'work' ? 'Work' : 'Life'}</Text>
                 )}
                 <Text style={styles.itemMeta}>{e.time || 'all day'}</Text>
@@ -517,7 +531,7 @@ export default function CalendarScreen({
                             {cell.day}
                           </Text>
                           {items.slice(0, 3).map((it) => {
-                            const away = it.kind !== 'todo' && foreign(it.owner);
+                            const away = !it.device && it.kind !== 'todo' && foreign(it.owner);
                             const f = away ? foreignRibbon(it.owner) : null;
                             return (
                               <View key={it.id} style={[
@@ -526,12 +540,14 @@ export default function CalendarScreen({
                                 it.kind === 'reminder' && styles.ribbonReminder,
                                 it.kind === 'todo' && styles.ribbonTodo,
                                 away && f.box,
+                                it.device && styles.ribbonDevice,
                               ]}>
                                 <Text
                                   style={[
                                     styles.ribbonText,
                                     it.kind === 'todo' && styles.ribbonTextTodo,
                                     away && f.text,
+                                    it.device && styles.ribbonTextDevice,
                                   ]}
                                   numberOfLines={1}
                                 >
@@ -587,7 +603,9 @@ export default function CalendarScreen({
                         <View key={it.id} style={styles.wkItem}>
                           <View style={[styles.itemDot, { backgroundColor: dotFor(it) }]} />
                           <Text style={styles.wkItemText} numberOfLines={1}>{it.title}</Text>
-                          {it.kind !== 'todo' && foreign(it.owner) && (
+                          {it.device ? (
+                            <Text style={styles.ownerTag}>Phone</Text>
+                          ) : it.kind !== 'todo' && foreign(it.owner) && (
                             <Text style={styles.ownerTag}>{it.owner === 'work' ? 'Work' : 'Life'}</Text>
                           )}
                           {it.time && <Text style={styles.wkTime}>{it.time}</Text>}
@@ -669,6 +687,8 @@ const makeStyles = (COLORS) => {
   ribbonTodo: { backgroundColor: `rgba(${tint},0.08)`, borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.lineStrong },
   ribbonText: { color: COLORS.bg, fontSize: 8.5, fontWeight: '700' },
   ribbonTextTodo: { color: COLORS.muted },
+  ribbonDevice: { backgroundColor: 'rgba(152,152,158,0.28)' },
+  ribbonTextDevice: { color: COLORS.mode === 'work' ? '#c9cbd2' : '#5a5a60' },
   moreText: { color: COLORS.muted2, fontSize: 9, fontWeight: '700', textAlign: 'center' },
 
   wkRow: {

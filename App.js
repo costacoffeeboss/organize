@@ -21,7 +21,7 @@
 // =====================================================================
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Animated, Easing } from 'react-native';
+import { View, Text, Animated, Easing, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -35,6 +35,8 @@ import {
   todayKey, addDays, parseKey, weekdayIndex,
   nextOccurrence, currentStreak, weekStreak,
 } from './utils/dates';
+import { ensureCalendarPermission, fetchDeviceEvents } from './utils/deviceCalendar';
+import { ensureNotifyPermission, rescheduleMorningDigests } from './utils/notify';
 import HomeScreen from './screens/HomeScreen';
 import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
@@ -56,6 +58,8 @@ const STEPS_KEY = '@organize_steps_v1'; // journal's "one step at a time" entrie
 const WELCOME_KEY = '@organize_welcomed_v1';
 const NAME_KEY = '@organize_name';
 const MODE_KEY = '@organize_mode_v1';
+const DEVICE_CAL_KEY = '@organize_device_cal_v1';
+const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
 const WORK_JOURNAL_KEY = '@organize_work_journal_v1';
@@ -134,6 +138,10 @@ export default function App() {
   const [reminders, setReminders] = useState([]);
 
   const [mode, setMode] = useState('life');
+  // Optional extras (both live behind toggles in Settings).
+  const [deviceCalOn, setDeviceCalOn] = useState(false);
+  const [deviceEvents, setDeviceEvents] = useState([]);
+  const [notifyOn, setNotifyOn] = useState(false);
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
   const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
@@ -152,7 +160,7 @@ export default function App() {
           HABITS_KEY, TODOS_KEY, TODOS_V1_KEY, EVENTS_KEY, REMINDERS_KEY, JOURNAL_KEY,
           GOALS_KEY, STEPS_KEY, WELCOME_KEY, NAME_KEY,
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
-          WORK_GOALS_KEY, WORK_STEPS_KEY,
+          WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -175,6 +183,8 @@ export default function App() {
         setWelcomed(pairs[8][1] === '1');
         setName(pairs[9][1] || '');
         setMode(pairs[10][1] === 'work' ? 'work' : 'life');
+        setDeviceCalOn(pairs[16][1] === '1');
+        setNotifyOn(pairs[17][1] === '1');
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -214,6 +224,59 @@ export default function App() {
     if (!loaded) return;
     save(STEPS_KEY, steps.life); save(WORK_STEPS_KEY, steps.work);
   }, [steps, loaded]);
+
+  // ================= Phone calendar & morning digests =================
+
+  // Mirror the phone's calendar while the toggle is on (nothing stored).
+  useEffect(() => {
+    if (!loaded) return;
+    if (!deviceCalOn) { setDeviceEvents([]); return; }
+    let alive = true;
+    fetchDeviceEvents().then((list) => { if (alive) setDeviceEvents(list); });
+    return () => { alive = false; };
+  }, [deviceCalOn, loaded]);
+
+  // Replan the 8am digests whenever events change (or the toggle flips).
+  useEffect(() => {
+    if (!loaded) return;
+    rescheduleMorningDigests(events, notifyOn);
+  }, [events, notifyOn, loaded]);
+
+  async function toggleDeviceCal() {
+    if (deviceCalOn) {
+      setDeviceCalOn(false);
+      AsyncStorage.setItem(DEVICE_CAL_KEY, '0').catch(() => {});
+      return;
+    }
+    const ok = await ensureCalendarPermission();
+    if (!ok) {
+      Alert.alert(
+        'Calendar access needed',
+        'Organize needs permission to read your calendar. You can grant it in the iPhone Settings app under Organize.'
+      );
+      return;
+    }
+    setDeviceCalOn(true);
+    AsyncStorage.setItem(DEVICE_CAL_KEY, '1').catch(() => {});
+  }
+
+  async function toggleNotify() {
+    if (notifyOn) {
+      setNotifyOn(false);
+      AsyncStorage.setItem(NOTIFY_KEY, '0').catch(() => {});
+      return;
+    }
+    const ok = await ensureNotifyPermission();
+    if (!ok) {
+      Alert.alert(
+        'Notifications are off',
+        'Allow notifications for Organize in the iPhone Settings app to get the morning digest.'
+      );
+      return;
+    }
+    setNotifyOn(true);
+    AsyncStorage.setItem(NOTIFY_KEY, '1').catch(() => {});
+  }
 
   // ================= Switching sides =================
 
@@ -442,6 +505,7 @@ export default function App() {
     setEvents([]); setReminders([]);
     setJournalSeed(null); setName('');
     setMode('life');
+    setDeviceCalOn(false); setDeviceEvents([]); setNotifyOn(false);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -535,6 +599,7 @@ export default function App() {
                   habits={habits[mode]}
                   todos={todos[mode]}
                   events={events}
+                  deviceEvents={deviceEvents}
                   reminders={reminders}
                   journal={journal[mode]}
                   toggleTodo={toggleTodo}
@@ -542,6 +607,10 @@ export default function App() {
                   onUpdateName={updateName}
                   onResetAll={resetAllData}
                   onSwitchMode={switchMode}
+                  deviceCalOn={deviceCalOn}
+                  onToggleDeviceCal={toggleDeviceCal}
+                  notifyOn={notifyOn}
+                  onToggleNotify={toggleNotify}
                 />
               )}
             </Tab.Screen>
@@ -562,6 +631,7 @@ export default function App() {
                   todos={todos[mode]}
                   toggleTodo={toggleTodo}
                   events={events}
+                  deviceEvents={deviceEvents}
                   addEvent={addEvent}
                   deleteEvent={deleteEvent}
                   unshareEvent={unshareEvent}

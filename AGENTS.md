@@ -87,11 +87,17 @@ So: **JS-only changes ship OTA on every push. Nothing else needed.**
 **Native changes** (new native module, permissions, SDK upgrade, anything touching
 `app.json` native config) do NOT ship OTA — they need a new TestFlight build:
 `.github/workflows/eas-build-ios.yml` (manual `workflow_dispatch`, input `submit`
-defaults true → auto-submits to TestFlight). The owner triggers it with one click on
-GitHub → Actions, then installs from TestFlight (~15–30 min). Builds use
-`runtimeVersion: { policy: "appVersion" }` (currently 1.0.0) — an OTA only reaches builds
-with the same app version, so after bumping the version, rebuild before OTAs land.
-TestFlight builds expire after ~90 days.
+defaults true → auto-submits to TestFlight; `ascAppId` is set in eas.json so it's fully
+hands-off). Trigger it via the GitHub MCP tools or one click on GitHub → Actions; the
+owner installs from TestFlight (~15–30 min build + ~10 min Apple processing).
+
+**runtimeVersion is an explicit string in app.json (currently "1.1.0").** An OTA only
+reaches builds with the SAME runtimeVersion. Whenever you add/remove a native module or
+change native config: bump the runtimeVersion string in the same commit as the JS that
+uses it, push (the OTA then can't touch older builds — this prevents bricking them),
+and trigger a TestFlight rebuild. Native modules so far: expo-updates, expo-calendar,
+expo-notifications (+ svg/pager/tab-view). Pin versions from
+`node_modules/expo/bundledNativeModules.json`. TestFlight builds expire after ~90 days.
 
 Secrets already in place: `EXPO_TOKEN` in GitHub repo secrets; App Store Connect API key
 (APP_MANAGER role) stored on EAS servers. Don't ask the owner to redo any of that.

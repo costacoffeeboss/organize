@@ -6,9 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.1.0",
     "updates": {
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 5000,
@@ -38,6 +36,15 @@
         "projectId": "d47274fa-5fef-47f1-9976-f885ba9f0c10"
       }
     },
-    "owner": "costasbowgen"
+    "owner": "costasbowgen",
+    "plugins": [
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Organize shows your phone's calendar events alongside its own, read-only."
+        }
+      ],
+      "expo-notifications"
+    ]
   }
 }
