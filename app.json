@@ -38,6 +38,7 @@
     },
     "owner": "costasbowgen",
     "plugins": [
+      "./plugins/withLocalOnlyNotifications.js",
       [
         "expo-calendar",
         {
