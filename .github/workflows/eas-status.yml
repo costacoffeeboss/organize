@@ -17,6 +17,7 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
       - name: List recent iOS builds
         run: |
           eas build:list --platform ios --limit 3 --non-interactive --json
