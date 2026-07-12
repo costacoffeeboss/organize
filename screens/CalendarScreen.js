@@ -18,6 +18,7 @@ import {
   PanResponder, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
@@ -38,6 +39,7 @@ const MINUTES = ['00', '15', '30', '45'];
 export default function CalendarScreen({
   mode, todos, toggleTodo, events, deviceEvents, addEvent, deleteEvent, unshareEvent,
   reminders, addReminder, deleteReminder, unshareReminder,
+  deviceCalOn, onToggleDeviceCal, deviceCalAll, onToggleDeviceCalAll,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const now = new Date();
@@ -53,6 +55,9 @@ export default function CalendarScreen({
   const [expanded, setExpanded] = useState(false);
   const [expMode, setExpMode] = useState('month'); // 'month' | 'week'
   const [weekAnchor, setWeekAnchor] = useState(today);
+
+  // Calendar-tab settings (the cog): phone-calendar mirroring.
+  const [showPrefs, setShowPrefs] = useState(false);
 
   // --- Add pop-up state ---
   const [showAdd, setShowAdd] = useState(false);
@@ -224,7 +229,18 @@ export default function CalendarScreen({
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader title="Calendar" subtitle="Your month at a glance" />
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <ScreenHeader title="Calendar" subtitle="Your month at a glance" />
+        </View>
+        <TouchableOpacity
+          style={styles.cog}
+          onPress={() => setShowPrefs(true)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="settings-outline" size={22} color={COLORS.muted} />
+        </TouchableOpacity>
+      </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
         <View style={styles.card}>
@@ -455,6 +471,42 @@ export default function CalendarScreen({
         )}
       </ModalShell>
 
+      {/* ================= Calendar settings (the cog) ================= */}
+      <ModalShell
+        visible={showPrefs}
+        onClose={() => setShowPrefs(false)}
+        title="Calendar settings"
+      >
+        <View>
+          <TouchableOpacity style={styles.prefRow} onPress={onToggleDeviceCal} activeOpacity={0.75}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prefTitle}>Show phone calendar</Text>
+              <Text style={styles.prefHint}>
+                Events you've added in your iPhone's calendars — home, work,
+                email accounts — appear here in grey, read-only.
+              </Text>
+            </View>
+            <View style={[styles.toggle, deviceCalOn && styles.toggleOn]}>
+              <View style={[styles.knob, deviceCalOn && styles.knobOn]} />
+            </View>
+          </TouchableOpacity>
+
+          {deviceCalOn && (
+            <TouchableOpacity style={styles.prefRow} onPress={onToggleDeviceCalAll} activeOpacity={0.75}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.prefTitle}>Include preloaded calendars</Text>
+                <Text style={styles.prefHint}>
+                  Also show holidays, birthdays and other feeds you didn't create.
+                </Text>
+              </View>
+              <View style={[styles.toggle, deviceCalAll && styles.toggleOn]}>
+                <View style={[styles.knob, deviceCalAll && styles.knobOn]} />
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ModalShell>
+
       {/* ================= Expanded calendar ================= */}
       <Modal visible={expanded} animationType="slide" onRequestClose={() => setExpanded(false)}>
         <FullPage>
@@ -629,6 +681,15 @@ const makeStyles = (COLORS) => {
   const tint = COLORS.mode === 'work' ? '201,205,214' : '75,54,38';
   return StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  cog: { paddingTop: 18, paddingLeft: 10 },
+  prefRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 12, marginBottom: 10,
+  },
+  prefTitle: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
+  prefHint: { color: COLORS.muted2, fontSize: 12, marginTop: 2, lineHeight: 16 },
   card: {
     backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
     borderRadius: 16, padding: 14, marginBottom: 16,

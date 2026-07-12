@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
-import { DEVICE_GREY, listDeviceCalendars } from '../utils/deviceCalendar';
+import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
   currentStreak,
@@ -77,7 +77,6 @@ function SwitchMark({ target, onPress }) {
 export default function HomeScreen({
   name, mode, habits, todos, events, deviceEvents, reminders, journal, toggleTodo,
   onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
-  deviceCalOn, onToggleDeviceCal, deviceCalIds, onSetDeviceCalIds,
   notifyOn, onToggleNotify,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
@@ -87,27 +86,6 @@ export default function HomeScreen({
   const [showSettings, setShowSettings] = useState(false);
   const [showSwitch, setShowSwitch] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
-  const [deviceCals, setDeviceCals] = useState([]); // for the picker
-
-  // Load the phone's calendar list for the picker while Settings is
-  // open and the mirror is on.
-  useEffect(() => {
-    if (!showSettings || !deviceCalOn) return;
-    listDeviceCalendars().then(setDeviceCals);
-  }, [showSettings, deviceCalOn]);
-
-  const calSelected = (c) =>
-    deviceCalIds ? deviceCalIds.includes(c.id) : c.suggested;
-
-  function toggleCalendar(c) {
-    // First tap materialises the default choice, then edits it.
-    const current = deviceCalIds
-      || deviceCals.filter((x) => x.suggested).map((x) => x.id);
-    const next = calSelected(c)
-      ? current.filter((id) => id !== c.id)
-      : [...current, c.id];
-    onSetDeviceCalIds(next);
-  }
 
   const otherMode = mode === 'life' ? 'work' : 'life';
 
@@ -394,35 +372,6 @@ export default function HomeScreen({
           </View>
 
           <Text style={[styles.settingsLabel, { marginTop: 20 }]}>Extras</Text>
-          <TouchableOpacity style={styles.prefRow} onPress={onToggleDeviceCal} activeOpacity={0.75}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.prefTitle}>Show phone calendar</Text>
-              <Text style={styles.prefHint}>Your iPhone's events appear in grey, read-only.</Text>
-            </View>
-            <View style={[styles.toggle, deviceCalOn && styles.toggleOn]}>
-              <View style={[styles.knob, deviceCalOn && styles.knobOn]} />
-            </View>
-          </TouchableOpacity>
-          {deviceCalOn && deviceCals.length > 0 && (
-            <ScrollView style={styles.calList} showsVerticalScrollIndicator={false}>
-              {deviceCals.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={styles.calRow}
-                  onPress={() => toggleCalendar(c)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.calDot, { backgroundColor: c.color }]} />
-                  <Text style={styles.calTitle} numberOfLines={1}>{c.title}</Text>
-                  <Ionicons
-                    name={calSelected(c) ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={20}
-                    color={calSelected(c) ? COLORS.espresso : COLORS.muted2}
-                  />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
           <TouchableOpacity style={styles.prefRow} onPress={onToggleNotify} activeOpacity={0.75}>
             <View style={{ flex: 1 }}>
               <Text style={styles.prefTitle}>Morning digest</Text>
@@ -485,17 +434,6 @@ const makeStyles = (COLORS) => StyleSheet.create({
   },
   prefTitle: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
   prefHint: { color: COLORS.muted2, fontSize: 12, marginTop: 2 },
-  calList: {
-    maxHeight: 168, marginTop: -4, marginBottom: 10,
-    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
-    borderRadius: 14, paddingHorizontal: 12, paddingVertical: 4,
-  },
-  calRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 9,
-  },
-  calDot: { width: 10, height: 10, borderRadius: 5 },
-  calTitle: { color: COLORS.ink, fontSize: 14, flex: 1 },
   toggle: {
     width: 46, height: 28, borderRadius: 14, padding: 3,
     backgroundColor: COLORS.mode === 'work' ? 'rgba(201,205,214,0.15)' : 'rgba(59,44,30,0.15)',

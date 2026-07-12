@@ -59,7 +59,7 @@ const WELCOME_KEY = '@organize_welcomed_v1';
 const NAME_KEY = '@organize_name';
 const MODE_KEY = '@organize_mode_v1';
 const DEVICE_CAL_KEY = '@organize_device_cal_v1';
-const DEVICE_CAL_IDS_KEY = '@organize_device_cal_ids_v1';
+const DEVICE_CAL_ALL_KEY = '@organize_device_cal_all_v1';
 const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
@@ -141,7 +141,7 @@ export default function App() {
   const [mode, setMode] = useState('life');
   // Optional extras (both live behind toggles in Settings).
   const [deviceCalOn, setDeviceCalOn] = useState(false);
-  const [deviceCalIds, setDeviceCalIds] = useState(null); // null = sensible default
+  const [deviceCalAll, setDeviceCalAll] = useState(false); // include preloaded feeds too
   const [deviceEvents, setDeviceEvents] = useState([]);
   const [notifyOn, setNotifyOn] = useState(false);
   const [welcomed, setWelcomed] = useState(false);
@@ -163,7 +163,7 @@ export default function App() {
           GOALS_KEY, STEPS_KEY, WELCOME_KEY, NAME_KEY,
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
           WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
-          DEVICE_CAL_IDS_KEY,
+          DEVICE_CAL_ALL_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -188,7 +188,7 @@ export default function App() {
         setMode(pairs[10][1] === 'work' ? 'work' : 'life');
         setDeviceCalOn(pairs[16][1] === '1');
         setNotifyOn(pairs[17][1] === '1');
-        setDeviceCalIds(val(18));
+        setDeviceCalAll(pairs[18][1] === '1');
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -236,14 +236,16 @@ export default function App() {
     if (!loaded) return;
     if (!deviceCalOn) { setDeviceEvents([]); return; }
     let alive = true;
-    fetchDeviceEvents(deviceCalIds).then((list) => { if (alive) setDeviceEvents(list); });
+    fetchDeviceEvents(deviceCalAll).then((list) => { if (alive) setDeviceEvents(list); });
     return () => { alive = false; };
-  }, [deviceCalOn, deviceCalIds, loaded]);
+  }, [deviceCalOn, deviceCalAll, loaded]);
 
-  // The per-calendar choice from Settings' picker.
-  function updateDeviceCalIds(ids) {
-    setDeviceCalIds(ids);
-    AsyncStorage.setItem(DEVICE_CAL_IDS_KEY, JSON.stringify(ids)).catch(() => {});
+  // Binary: mirror everything (preloaded feeds included) or just the
+  // user's own calendars.
+  function toggleDeviceCalAll() {
+    const next = !deviceCalAll;
+    setDeviceCalAll(next);
+    AsyncStorage.setItem(DEVICE_CAL_ALL_KEY, next ? '1' : '0').catch(() => {});
   }
 
   // Replan the 8am digests whenever events change (or the toggle flips).
@@ -515,7 +517,7 @@ export default function App() {
     setEvents([]); setReminders([]);
     setJournalSeed(null); setName('');
     setMode('life');
-    setDeviceCalOn(false); setDeviceCalIds(null); setDeviceEvents([]); setNotifyOn(false);
+    setDeviceCalOn(false); setDeviceCalAll(false); setDeviceEvents([]); setNotifyOn(false);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -617,10 +619,6 @@ export default function App() {
                   onUpdateName={updateName}
                   onResetAll={resetAllData}
                   onSwitchMode={switchMode}
-                  deviceCalOn={deviceCalOn}
-                  onToggleDeviceCal={toggleDeviceCal}
-                  deviceCalIds={deviceCalIds}
-                  onSetDeviceCalIds={updateDeviceCalIds}
                   notifyOn={notifyOn}
                   onToggleNotify={toggleNotify}
                 />
@@ -644,6 +642,10 @@ export default function App() {
                   toggleTodo={toggleTodo}
                   events={events}
                   deviceEvents={deviceEvents}
+                  deviceCalOn={deviceCalOn}
+                  onToggleDeviceCal={toggleDeviceCal}
+                  deviceCalAll={deviceCalAll}
+                  onToggleDeviceCalAll={toggleDeviceCalAll}
                   addEvent={addEvent}
                   deleteEvent={deleteEvent}
                   unshareEvent={unshareEvent}
