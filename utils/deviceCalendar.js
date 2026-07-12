@@ -35,13 +35,38 @@ function isUsersOwnCalendar(cal) {
   return type !== 'subscribed' && type !== 'birthdays';
 }
 
-// Every event on the user's own calendars, normalised to Organize's
-// shape. Recurring events arrive pre-expanded (one entry per
-// occurrence), so the date joins the id to keep keys unique.
-export async function fetchDeviceEvents(backDays = 60, aheadDays = 365) {
+// The phone's calendars, for the picker in Settings. `suggested` marks
+// the ones our heuristic would mirror by default.
+export async function listDeviceCalendars() {
   try {
     const all = await DeviceCalendar.getCalendarsAsync(DeviceCalendar.EntityTypes.EVENT);
-    const cals = all.filter(isUsersOwnCalendar);
+    return all
+      .map((c) => ({
+        id: c.id,
+        title: c.title || 'Untitled',
+        color: c.color || DEVICE_GREY,
+        suggested: isUsersOwnCalendar(c),
+      }))
+      .sort((a, b) =>
+        a.suggested === b.suggested
+          ? a.title.localeCompare(b.title)
+          : a.suggested ? -1 : 1
+      );
+  } catch (e) {
+    return [];
+  }
+}
+
+// Every event on the chosen calendars (or, with no explicit choice,
+// the user's own calendars), normalised to Organize's shape. Recurring
+// events arrive pre-expanded (one entry per occurrence), so the date
+// joins the id to keep keys unique.
+export async function fetchDeviceEvents(selectedIds = null, backDays = 60, aheadDays = 365) {
+  try {
+    const all = await DeviceCalendar.getCalendarsAsync(DeviceCalendar.EntityTypes.EVENT);
+    const cals = selectedIds
+      ? all.filter((c) => selectedIds.includes(c.id))
+      : all.filter(isUsersOwnCalendar);
     if (!cals.length) return [];
     const start = new Date(); start.setDate(start.getDate() - backDays);
     const end = new Date(); end.setDate(end.getDate() + aheadDays);
