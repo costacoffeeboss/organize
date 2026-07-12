@@ -23,10 +23,10 @@ import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, monthLabel, shortDate, monthCells, repeatOccursOn,
-  reminderOccursOn, weekStartKey, addDays, parseKey, WEEKDAY_LETTERS,
+  reminderOccursOn, eventOccursOn, weekStartKey, addDays, parseKey,
+  WEEKDAY_LETTERS,
 } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
-import TodoRow from '../components/TodoRow';
 import MonthGrid from '../components/MonthGrid';
 import ModalShell from '../components/ModalShell';
 import CalendarPager from '../components/CalendarPager';
@@ -65,6 +65,7 @@ export default function CalendarScreen({
   const [kind, setKind] = useState('event'); // 'event' | 'reminder'
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(today);
+  const [endDate, setEndDate] = useState(null); // multi-day events
   const [timeOn, setTimeOn] = useState(false);
   const [hour, setHour] = useState('09');
   const [minute, setMinute] = useState('00');
@@ -73,7 +74,8 @@ export default function CalendarScreen({
 
   function openAdd() {
     setPage('form'); setKind('event'); setTitle('');
-    setDate(selected); setTimeOn(false); setHour('09'); setMinute('00');
+    setDate(selected); setEndDate(null);
+    setTimeOn(false); setHour('09'); setMinute('00');
     setYearly(false); setShareAcross(true); setShowAdd(true);
   }
 
@@ -81,7 +83,12 @@ export default function CalendarScreen({
     const t = title.trim();
     if (!t) return;
     if (kind === 'event') {
-      addEvent({ title: t, date, time: timeOn ? `${hour}:${minute}` : null, shared: shareAcross });
+      addEvent({
+        title: t, date,
+        endDate: endDate && endDate > date ? endDate : null,
+        time: timeOn ? `${hour}:${minute}` : null,
+        shared: shareAcross,
+      });
     } else {
       addReminder({ title: t, date, yearly, shared: shareAcross });
     }
@@ -111,9 +118,9 @@ export default function CalendarScreen({
   }
   function eventsOn(key) {
     return [
-      ...events.filter((e) => visible(e) && e.date === key),
+      ...events.filter((e) => visible(e) && eventOccursOn(e, key)),
       // the phone's own events, mirrored read-only in neutral grey
-      ...deviceEvents.filter((e) => e.date === key),
+      ...deviceEvents.filter((e) => eventOccursOn(e, key)),
     ].sort((a, b) => (a.time || '') < (b.time || '') ? -1 : 1); // all-day first
   }
   function remindersOn(key) {
@@ -186,11 +193,14 @@ export default function CalendarScreen({
     if (d.length) dots[cell.key] = d;
   });
 
-  const dayEvents = eventsOn(selected);
-  const dayReminders = remindersOn(selected);
-  const dayTodos = todosOn(selected);
-  const nothing = !dayEvents.length && !dayReminders.length && !dayTodos.length;
-  const overdue = selected < today;
+  // The list under the grid: the selected day plus the two after it.
+  // Events and reminders only — to-dos live on the grid and their own tab.
+  const threeDays = Array.from({ length: 3 }, (_, i) => addDays(selected, i));
+
+  const eventMeta = (e) => {
+    if (e.endDate) return `${e.time ? `${e.time} · ` : ''}until ${shortDate(e.endDate)}`;
+    return e.time || 'all day';
+  };
 
   function confirmDelete(label, fn) {
     Alert.alert(`Delete ${label}?`, 'This cannot be undone.', [
@@ -224,8 +234,6 @@ export default function CalendarScreen({
       ]
     );
   }
-
-  const isTodoDone = (t) => (t.repeat ? t.completedOn === selected : t.done);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -270,80 +278,56 @@ export default function CalendarScreen({
           />
         </View>
 
-        <Text style={styles.dayTitle}>{shortDate(selected)}</Text>
+        {/* --- The next three days, starting from the selected one --- */}
+        {threeDays.map((day) => {
+          const evs = eventsOn(day);
+          const rems = remindersOn(day);
+          return (
+            <View key={day}>
+              <Text style={styles.dayTitle}>
+                {day === today ? `Today · ${shortDate(day)}` : shortDate(day)}
+              </Text>
 
-        {nothing && <Text style={styles.empty}>Nothing on this day.</Text>}
+              {evs.length === 0 && rems.length === 0 && (
+                <Text style={styles.empty}>Nothing on.</Text>
+              )}
 
-        {/* --- Events --- */}
-        {dayEvents.length > 0 && (
-          <View>
-            <Text style={styles.groupTitle}>Events</Text>
-            {dayEvents.map((e) => (
-              <TouchableOpacity
-                key={e.id}
-                style={styles.itemRow}
-                onLongPress={() => confirmRemove('event', e, deleteEvent, unshareEvent)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'event', owner: e.owner, device: e.device }) }]} />
-                <Text style={styles.itemTitle} numberOfLines={2}>{e.title}</Text>
-                {e.device ? (
-                  <Text style={styles.ownerTag}>Phone</Text>
-                ) : foreign(e.owner) && (
-                  <Text style={styles.ownerTag}>{e.owner === 'work' ? 'Work' : 'Life'}</Text>
-                )}
-                <Text style={styles.itemMeta}>{e.time || 'all day'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+              {evs.map((e) => (
+                <TouchableOpacity
+                  key={e.id}
+                  style={styles.itemRow}
+                  onLongPress={() => confirmRemove('event', e, deleteEvent, unshareEvent)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'event', owner: e.owner, device: e.device }) }]} />
+                  <Text style={styles.itemTitle} numberOfLines={2}>{e.title}</Text>
+                  {e.device ? (
+                    <Text style={styles.ownerTag}>Phone</Text>
+                  ) : foreign(e.owner) && (
+                    <Text style={styles.ownerTag}>{e.owner === 'work' ? 'Work' : 'Life'}</Text>
+                  )}
+                  <Text style={styles.itemMeta}>{eventMeta(e)}</Text>
+                </TouchableOpacity>
+              ))}
 
-        {/* --- Reminders --- */}
-        {dayReminders.length > 0 && (
-          <View>
-            <Text style={styles.groupTitle}>Reminders</Text>
-            {dayReminders.map((r) => (
-              <TouchableOpacity
-                key={r.id}
-                style={styles.itemRow}
-                onLongPress={() => confirmRemove('reminder', r, deleteReminder, unshareReminder)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'reminder', owner: r.owner }) }]} />
-                <Text style={styles.itemTitle} numberOfLines={2}>{r.title}</Text>
-                {foreign(r.owner) && (
-                  <Text style={styles.ownerTag}>{r.owner === 'work' ? 'Work' : 'Life'}</Text>
-                )}
-                {r.yearly && <Text style={styles.itemMeta}>yearly</Text>}
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* --- To-dos --- */}
-        {dayTodos.length > 0 && (
-          <View>
-            <Text style={styles.groupTitle}>To-dos</Text>
-            {dayTodos.map((t) => (
-              <TodoRow
-                key={t.id}
-                title={t.title}
-                done={isTodoDone(t)}
-                meta={
-                  isTodoDone(t) ? 'done'
-                    : !t.repeat && overdue ? 'overdue'
-                    : t.repeat && selected !== today ? 'repeats' : null
-                }
-                metaColor={!isTodoDone(t) && !t.repeat && overdue ? COLORS.danger : undefined}
-                // Recurring tasks can only be ticked on the day itself.
-                onToggle={() => {
-                  if (t.repeat && selected !== today) return;
-                  toggleTodo(t.id);
-                }}
-              />
-            ))}
-          </View>
-        )}
+              {rems.map((r) => (
+                <TouchableOpacity
+                  key={r.id}
+                  style={styles.itemRow}
+                  onLongPress={() => confirmRemove('reminder', r, deleteReminder, unshareReminder)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.itemDot, { backgroundColor: dotFor({ kind: 'reminder', owner: r.owner }) }]} />
+                  <Text style={styles.itemTitle} numberOfLines={2}>{r.title}</Text>
+                  {foreign(r.owner) && (
+                    <Text style={styles.ownerTag}>{r.owner === 'work' ? 'Work' : 'Life'}</Text>
+                  )}
+                  {r.yearly && <Text style={styles.itemMeta}>yearly</Text>}
+                </TouchableOpacity>
+              ))}
+            </View>
+          );
+        })}
       </ScrollView>
 
       <FAB onPress={openAdd} />
@@ -352,7 +336,7 @@ export default function CalendarScreen({
       <ModalShell
         visible={showAdd}
         onClose={() => setShowAdd(false)}
-        title={page === 'date' ? 'Date' : kind === 'event' ? 'New event' : 'New reminder'}
+        title={page === 'date' ? 'Date' : page === 'end' ? 'Ends' : kind === 'event' ? 'New event' : 'New reminder'}
       >
         {page === 'form' && (
           <View>
@@ -382,9 +366,19 @@ export default function CalendarScreen({
             />
 
             <TouchableOpacity style={styles.fieldRow} onPress={() => setPage('date')}>
-              <Text style={styles.fieldLabel}>Date</Text>
+              <Text style={styles.fieldLabel}>{kind === 'event' ? 'Starts' : 'Date'}</Text>
               <Text style={styles.fieldValue}>{shortDate(date)} ›</Text>
             </TouchableOpacity>
+
+            {/* Event: optional end date for multi-day events */}
+            {kind === 'event' && (
+              <TouchableOpacity style={styles.fieldRow} onPress={() => setPage('end')}>
+                <Text style={styles.fieldLabel}>Ends</Text>
+                <Text style={styles.fieldValue}>
+                  {endDate && endDate > date ? `${shortDate(endDate)} ›` : 'Same day ›'}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Event: optional time */}
             {kind === 'event' && (
@@ -459,10 +453,35 @@ export default function CalendarScreen({
             <CalendarPager
               initialKey={date}
               selected={date}
-              onSelect={(k) => { setDate(k); setPage('form'); }}
+              onSelect={(k) => {
+                setDate(k);
+                if (endDate && endDate <= k) setEndDate(null); // keep span valid
+                setPage('form');
+              }}
             />
             <View style={styles.pickerBtns}>
               <View />
+              <TouchableOpacity onPress={() => setPage('form')}>
+                <Text style={styles.linkBtn}>Back</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {page === 'end' && (
+          <View>
+            <CalendarPager
+              initialKey={endDate || date}
+              selected={endDate}
+              onSelect={(k) => {
+                setEndDate(k > date ? k : null); // same/earlier day = single-day
+                setPage('form');
+              }}
+            />
+            <View style={styles.pickerBtns}>
+              <TouchableOpacity onPress={() => { setEndDate(null); setPage('form'); }}>
+                <Text style={styles.ghostBtn}>Same day</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setPage('form')}>
                 <Text style={styles.linkBtn}>Back</Text>
               </TouchableOpacity>
@@ -847,5 +866,6 @@ const makeStyles = (COLORS) => {
     marginTop: 12, paddingHorizontal: 4,
   },
   linkBtn: { color: COLORS.espresso, fontSize: 15, fontWeight: '700' },
+  ghostBtn: { color: COLORS.muted, fontSize: 15, fontWeight: '600' },
   });
 };

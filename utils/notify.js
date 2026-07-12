@@ -10,7 +10,7 @@
 // =====================================================================
 
 import * as Notifications from 'expo-notifications';
-import { todayKey } from './dates';
+import { todayKey, addDays } from './dates';
 
 export const DIGEST_HOUR = 8;
 
@@ -49,11 +49,16 @@ export async function rescheduleMorningDigests(events, enabled) {
       (now.getHours() === DIGEST_HOUR && now.getMinutes() > 0);
 
     // Group upcoming events by day (today only if 8am hasn't passed).
+    // Multi-day events appear in every morning of their span.
     const byDay = {};
     events.forEach((e) => {
-      if (e.date < today) return;
-      if (e.date === today && morningGone) return;
-      (byDay[e.date] = byDay[e.date] || []).push(e);
+      const end = e.endDate && e.endDate > e.date ? e.endDate : e.date;
+      let guard = 0;
+      for (let d = e.date; d <= end && guard < 90; d = addDays(d, 1), guard++) {
+        if (d < today) continue;
+        if (d === today && morningGone) continue;
+        (byDay[d] = byDay[d] || []).push(e);
+      }
     });
 
     // Nearest 50 days with events — replanned on every change, so the

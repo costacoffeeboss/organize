@@ -25,7 +25,7 @@ import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
-  currentStreak,
+  eventOccursOn, currentStreak,
 } from '../utils/dates';
 import { getNotices } from '../utils/noticer';
 import ScreenHeader from '../components/ScreenHeader';
@@ -153,8 +153,8 @@ export default function HomeScreen({
   // other side shared across. Foreign entries keep their side's colours.
   const visible = (x) => x.owner === mode || x.shared;
   const dayEvents = [
-    ...events.filter((e) => visible(e) && e.date === today),
-    ...deviceEvents.filter((e) => e.date === today), // the phone's own, in grey
+    ...events.filter((e) => visible(e) && eventOccursOn(e, today)),
+    ...deviceEvents.filter((e) => eventOccursOn(e, today)), // the phone's own, in grey
   ].sort((a, b) => ((a.time || '') < (b.time || '') ? -1 : 1));
   const dayReminders = reminders.filter((r) => visible(r) && reminderOccursOn(r, today));
   const overdueTodos = todos.filter((t) => !t.repeat && !t.done && t.deadline && t.deadline < today);

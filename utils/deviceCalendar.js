@@ -53,10 +53,16 @@ export async function fetchDeviceEvents(includeAll = false, backDays = 60, ahead
       const key = dateKey(d);
       const hh = String(d.getHours()).padStart(2, '0');
       const mm = String(d.getMinutes()).padStart(2, '0');
+      // Multi-day spans keep their end day. All-day events end at the
+      // NEXT midnight in EventKit, so step back a minute first.
+      let last = e.endDate ? new Date(e.endDate) : null;
+      if (last && e.allDay) last = new Date(last.getTime() - 60000);
+      const endKey = last ? dateKey(last) : null;
       return {
         id: `dev-${e.id}-${key}`,
         title: e.title || 'Untitled',
         date: key,
+        endDate: endKey && endKey > key ? endKey : null,
         time: e.allDay ? null : `${hh}:${mm}`,
         device: true,
       };

@@ -389,9 +389,11 @@ export default function App() {
   //  Entries are born on the current side (`owner: mode`). `shared`
   //  (default true) also shows them in the other side's calendar.
 
-  function addEvent({ title, date, time, shared }) {
+  function addEvent({ title, date, endDate, time, shared }) {
     setEvents((prev) => [...prev, {
-      id: Date.now().toString(), title, date, time: time || null,
+      id: Date.now().toString(), title, date,
+      endDate: endDate && endDate > date ? endDate : null, // multi-day span
+      time: time || null,
       owner: mode, shared: shared !== false,
     }]);
   }

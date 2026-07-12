@@ -143,6 +143,15 @@ export function repeatLabel(repeat) {
 }
 
 // =====================================================================
+//  Events: single-day unless they carry an endDate, in which case they
+//  cover every day of the span.
+// =====================================================================
+
+export function eventOccursOn(event, key) {
+  return key >= event.date && key <= (event.endDate || event.date);
+}
+
+// =====================================================================
 //  Yearly reminders (birthdays): does a reminder land on this day?
 // =====================================================================
 
