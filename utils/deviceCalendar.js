@@ -25,12 +25,23 @@ export async function ensureCalendarPermission() {
   }
 }
 
-// Every event on every calendar the phone knows about, normalised to
-// Organize's shape. Recurring events arrive pre-expanded (one entry
-// per occurrence), so the date joins the id to keep keys unique.
+// Only calendars the user actually writes to. Apple pre-loads phones
+// with subscribed feeds (US Holidays…), an auto Birthdays calendar and
+// Siri suggestions — all flagged read-only or by type, so they're easy
+// to leave out.
+function isUsersOwnCalendar(cal) {
+  if (!cal.allowsModifications) return false;
+  const type = String(cal.type || '').toLowerCase();
+  return type !== 'subscribed' && type !== 'birthdays';
+}
+
+// Every event on the user's own calendars, normalised to Organize's
+// shape. Recurring events arrive pre-expanded (one entry per
+// occurrence), so the date joins the id to keep keys unique.
 export async function fetchDeviceEvents(backDays = 60, aheadDays = 365) {
   try {
-    const cals = await DeviceCalendar.getCalendarsAsync(DeviceCalendar.EntityTypes.EVENT);
+    const all = await DeviceCalendar.getCalendarsAsync(DeviceCalendar.EntityTypes.EVENT);
+    const cals = all.filter(isUsersOwnCalendar);
     if (!cals.length) return [];
     const start = new Date(); start.setDate(start.getDate() - backDays);
     const end = new Date(); end.setDate(end.getDate() + aheadDays);
