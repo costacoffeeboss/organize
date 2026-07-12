@@ -41,7 +41,7 @@ import HomeScreen from './screens/HomeScreen';
 import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import HabitsScreen from './screens/HabitsScreen';
-import JournalScreen from './screens/JournalScreen';
+import JournalScreen, { DEFAULT_GUIDED_SECTIONS } from './screens/JournalScreen';
 import GoalsScreen from './screens/GoalsScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 
@@ -60,6 +60,8 @@ const NAME_KEY = '@organize_name';
 const MODE_KEY = '@organize_mode_v1';
 const DEVICE_CAL_KEY = '@organize_device_cal_v1';
 const DEVICE_CAL_ALL_KEY = '@organize_device_cal_all_v1';
+const GUIDED_ON_KEY = '@organize_journal_guided_v1';
+const GUIDED_SECTIONS_KEY = '@organize_journal_sections_v1';
 const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
@@ -144,6 +146,8 @@ export default function App() {
   const [deviceCalAll, setDeviceCalAll] = useState(false); // include preloaded feeds too
   const [deviceEvents, setDeviceEvents] = useState([]);
   const [notifyOn, setNotifyOn] = useState(false);
+  const [guidedOn, setGuidedOn] = useState(false);
+  const [guidedSections, setGuidedSections] = useState(DEFAULT_GUIDED_SECTIONS);
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
   const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
@@ -163,7 +167,7 @@ export default function App() {
           GOALS_KEY, STEPS_KEY, WELCOME_KEY, NAME_KEY,
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
           WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
-          DEVICE_CAL_ALL_KEY,
+          DEVICE_CAL_ALL_KEY, GUIDED_ON_KEY, GUIDED_SECTIONS_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -189,6 +193,11 @@ export default function App() {
         setDeviceCalOn(pairs[16][1] === '1');
         setNotifyOn(pairs[17][1] === '1');
         setDeviceCalAll(pairs[18][1] === '1');
+        setGuidedOn(pairs[19][1] === '1');
+        const savedSections = val(20);
+        if (Array.isArray(savedSections) && savedSections.length) {
+          setGuidedSections(savedSections);
+        }
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -420,8 +429,22 @@ export default function App() {
 
   // ================= Journal actions =================
 
-  function saveEntry(key, { text, mood }) {
-    setJournal(onSide((entries) => ({ ...entries, [key]: { text, mood: mood || null } })));
+  function saveEntry(key, { text, mood, guided }) {
+    setJournal(onSide((entries) => ({
+      ...entries,
+      [key]: { text, mood: mood || null, guided: guided || null },
+    })));
+  }
+
+  // Guided-journal preferences (shared across Life and Work).
+  function toggleGuided() {
+    const next = !guidedOn;
+    setGuidedOn(next);
+    AsyncStorage.setItem(GUIDED_ON_KEY, next ? '1' : '0').catch(() => {});
+  }
+  function updateGuidedSections(sections) {
+    setGuidedSections(sections);
+    AsyncStorage.setItem(GUIDED_SECTIONS_KEY, JSON.stringify(sections)).catch(() => {});
   }
   function deleteEntry(key) {
     setJournal(onSide((entries) => {
@@ -520,6 +543,7 @@ export default function App() {
     setJournalSeed(null); setName('');
     setMode('life');
     setDeviceCalOn(false); setDeviceCalAll(false); setDeviceEvents([]); setNotifyOn(false);
+    setGuidedOn(false); setGuidedSections(DEFAULT_GUIDED_SECTIONS);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -692,6 +716,10 @@ export default function App() {
                   goals={goals[mode]}
                   journalSeed={journalSeed}
                   onSeedConsumed={() => setJournalSeed(null)}
+                  guidedOn={guidedOn}
+                  onToggleGuided={toggleGuided}
+                  guidedSections={guidedSections}
+                  onSetGuidedSections={updateGuidedSections}
                 />
               )}
             </Tab.Screen>

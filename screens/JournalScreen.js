@@ -11,10 +11,12 @@ import {
   KeyboardAvoidingView, Platform, Alert, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, SERIF } from '../theme';
 import { todayKey, niceDate, currentStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
+import ModalShell from '../components/ModalShell';
 import FullPage from '../components/FullPage';
 import FAB from '../components/FAB';
 
@@ -37,10 +39,20 @@ const PROMPTS = [
 
 const STEP_PROMPT = 'One step at a time — what step did you take today?';
 
+// The guided-journal format, editable in the tab's settings cog.
+export const DEFAULT_GUIDED_SECTIONS = [
+  { id: 'gratitude', title: 'Gratitude', prompt: 'List 5 things you feel grateful for today.' },
+  { id: 'well', title: 'What went well today?', prompt: 'Big or small — what worked?' },
+  { id: 'improve', title: 'What could be improved?', prompt: 'Be honest, not harsh.' },
+  { id: 'action', title: 'How will you go about that improvement?', prompt: 'One concrete thing.' },
+  { id: 'free', title: 'Free thoughts', prompt: 'Anything else on your mind.' },
+];
+
 export default function JournalScreen({
   journal, saveEntry, deleteEntry,
   steps, saveStep, deleteStep, goals,
   journalSeed, onSeedConsumed,
+  guidedOn, onToggleGuided, guidedSections, onSetGuidedSections,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
@@ -51,6 +63,13 @@ export default function JournalScreen({
   const [seedPrompt, setSeedPrompt] = useState(null); // companion question → composer
   const [stepKey, setStepKey] = useState(null); // day whose step is open
   const [stepDraft, setStepDraft] = useState('');
+
+  // --- Guided journaling ---
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [newSection, setNewSection] = useState('');
+  const [guidedMode, setGuidedMode] = useState(false);     // this composer session
+  const [composerSections, setComposerSections] = useState([]);
+  const [guidedDraft, setGuidedDraft] = useState({});      // title -> text
 
   const entryDays = new Set(Object.keys(journal));
   const streak = currentStreak(entryDays);
@@ -94,16 +113,59 @@ export default function JournalScreen({
   function openDay(key, seed = null) {
     if (key > today) return; // can't journal the future
     const existing = journal[key];
-    setDraft(existing ? existing.text : '');
     setMood(existing ? existing.mood : null);
     setSeedPrompt(seed);
+
+    // Guided composer for new entries and guided ones; entries written
+    // as plain pages stay plain pages.
+    const guided = guidedOn && (!existing || existing.guided);
+    setGuidedMode(guided);
+    if (guided) {
+      // Current format, plus any sections an older entry used that have
+      // since been removed — nothing gets lost.
+      const extras = (existing?.guided || [])
+        .filter((s) => !guidedSections.some((g) => g.title === s.title))
+        .map((s) => ({ id: `old-${s.title}`, title: s.title, prompt: '' }));
+      setComposerSections([...guidedSections, ...extras]);
+      const drafts = {};
+      (existing?.guided || []).forEach((s) => { drafts[s.title] = s.text; });
+      setGuidedDraft(drafts);
+      setDraft('');
+    } else {
+      setDraft(existing ? existing.text : '');
+    }
     setEditingKey(key);
   }
 
+  const guidedHasText = Object.values(guidedDraft).some((t) => (t || '').trim());
+  const canSave = guidedMode ? guidedHasText : !!draft.trim();
+
   function onSave() {
-    const text = draft.trim();
-    if (text) saveEntry(editingKey, { text, mood });
+    if (guidedMode) {
+      const filled = composerSections
+        .map((s) => ({ title: s.title, text: (guidedDraft[s.title] || '').trim() }))
+        .filter((s) => s.text);
+      if (filled.length) {
+        // Compiled text keeps previews (Home card, day list) working.
+        const text = filled.map((s) => `${s.title}\n${s.text}`).join('\n\n');
+        saveEntry(editingKey, { text, mood, guided: filled });
+      }
+    } else {
+      const text = draft.trim();
+      if (text) saveEntry(editingKey, { text, mood });
+    }
     setEditingKey(null);
+  }
+
+  // --- Guided-format editing (the settings cog) ---
+  function removeSection(id) {
+    onSetGuidedSections(guidedSections.filter((s) => s.id !== id));
+  }
+  function addSection() {
+    const t = newSection.trim();
+    if (!t) return;
+    onSetGuidedSections([...guidedSections, { id: `custom-${Date.now()}`, title: t, prompt: '' }]);
+    setNewSection('');
   }
 
   function onDelete() {
@@ -126,10 +188,21 @@ export default function JournalScreen({
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScreenHeader
-        title="Journal"
-        subtitle={streak > 1 ? `${streak}-day streak — keep it going` : 'A few honest lines a day'}
-      />
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <ScreenHeader
+            title="Journal"
+            subtitle={streak > 1 ? `${streak}-day streak — keep it going` : 'A few honest lines a day'}
+          />
+        </View>
+        <TouchableOpacity
+          style={styles.cog}
+          onPress={() => setShowPrefs(true)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="settings-outline" size={22} color={COLORS.muted} />
+        </TouchableOpacity>
+      </View>
 
       {/* Today's reflections | steps toward your goals */}
       <View style={styles.segment}>
@@ -208,6 +281,63 @@ export default function JournalScreen({
 
       <FAB onPress={() => (part === 'today' ? openDay(today) : openStep(today))} />
 
+      {/* ============ Journal settings (the cog) ============ */}
+      <ModalShell
+        visible={showPrefs}
+        onClose={() => setShowPrefs(false)}
+        title="Journal settings"
+      >
+        <View>
+          <TouchableOpacity style={styles.prefRow} onPress={onToggleGuided} activeOpacity={0.75}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prefTitle}>Guided journaling</Text>
+              <Text style={styles.prefHint}>
+                Structured sections instead of a blank page.
+              </Text>
+            </View>
+            <View style={[styles.toggle, guidedOn && styles.toggleOn]}>
+              <View style={[styles.knob, guidedOn && styles.knobOn]} />
+            </View>
+          </TouchableOpacity>
+
+          {guidedOn && (
+            <View>
+              <Text style={styles.secLabel}>Sections</Text>
+              <ScrollView style={styles.secList} showsVerticalScrollIndicator={false}>
+                {guidedSections.map((s) => (
+                  <View key={s.id} style={styles.secRow}>
+                    <Text style={styles.secTitle} numberOfLines={1}>{s.title}</Text>
+                    <TouchableOpacity
+                      onPress={() => removeSection(s.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.secRemove}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+              <View style={styles.addRow}>
+                <TextInput
+                  style={styles.addInput}
+                  placeholder="Add a section…"
+                  placeholderTextColor={COLORS.muted2}
+                  value={newSection}
+                  onChangeText={setNewSection}
+                  onSubmitEditing={addSection}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity style={styles.addBtn} onPress={addSection}>
+                  <Text style={styles.addBtnText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity onPress={() => onSetGuidedSections(DEFAULT_GUIDED_SECTIONS)}>
+                <Text style={styles.resetLink}>Restore default sections</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </ModalShell>
+
       {/* ============ Full-page write / read ============ */}
       <Modal
         visible={!!editingKey}
@@ -232,10 +362,10 @@ export default function JournalScreen({
               </Text>
               <TouchableOpacity
                 onPress={onSave}
-                disabled={!draft.trim()}
+                disabled={!canSave}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Text style={[styles.pageSave, !draft.trim() && { opacity: 0.35 }]}>Save</Text>
+                <Text style={[styles.pageSave, !canSave && { opacity: 0.35 }]}>Save</Text>
               </TouchableOpacity>
             </View>
 
@@ -255,22 +385,52 @@ export default function JournalScreen({
               ))}
             </View>
 
-            {/* The page itself — all remaining space is for writing.
+            {/* The page itself. Guided mode lays out one soft box per
+                section; otherwise the whole page is for free writing.
                 If the companion asked something, its question is the prompt. */}
-            <TextInput
-              style={styles.page}
-              placeholder={seedPrompt || prompt}
-              placeholderTextColor={COLORS.muted2}
-              value={draft}
-              onChangeText={setDraft}
-              multiline
-              textAlignVertical="top"
-              autoFocus
-              scrollEnabled
-            />
+            {guidedMode ? (
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.guidedWrap}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {composerSections.map((s) => (
+                  <View key={s.id} style={styles.guidedSection}>
+                    <Text style={styles.guidedTitle}>{s.title}</Text>
+                    <TextInput
+                      style={styles.guidedInput}
+                      placeholder={s.prompt || 'Write freely…'}
+                      placeholderTextColor={COLORS.muted2}
+                      value={guidedDraft[s.title] || ''}
+                      onChangeText={(t) => setGuidedDraft((prev) => ({ ...prev, [s.title]: t }))}
+                      multiline
+                      textAlignVertical="top"
+                    />
+                  </View>
+                ))}
+                {journal[editingKey] && (
+                  <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
+                    <Text style={styles.deleteBtn}>Delete entry</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            ) : (
+              <TextInput
+                style={styles.page}
+                placeholder={seedPrompt || prompt}
+                placeholderTextColor={COLORS.muted2}
+                value={draft}
+                onChangeText={setDraft}
+                multiline
+                textAlignVertical="top"
+                autoFocus
+                scrollEnabled
+              />
+            )}
 
-            {/* Delete lives quietly at the foot of existing entries */}
-            {journal[editingKey] && (
+            {/* Delete lives quietly at the foot of existing plain entries */}
+            {!guidedMode && journal[editingKey] && (
               <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
                 <Text style={styles.deleteBtn}>Delete entry</Text>
               </TouchableOpacity>
@@ -346,6 +506,66 @@ export default function JournalScreen({
 
 const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  cog: { paddingTop: 18, paddingLeft: 10 },
+
+  // --- settings (the cog) ---
+  prefRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 12, marginBottom: 12,
+  },
+  prefTitle: { color: COLORS.ink, fontSize: 15, fontWeight: '600' },
+  prefHint: { color: COLORS.muted2, fontSize: 12, marginTop: 2 },
+  toggle: {
+    width: 46, height: 28, borderRadius: 14, padding: 3,
+    backgroundColor: COLORS.mode === 'work' ? 'rgba(201,205,214,0.15)' : 'rgba(59,44,30,0.15)',
+  },
+  toggleOn: { backgroundColor: COLORS.espresso },
+  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.panel },
+  knobOn: { marginLeft: 18 },
+  secLabel: {
+    color: COLORS.muted2, fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8,
+  },
+  secList: {
+    maxHeight: 190, backgroundColor: COLORS.panelDeep,
+    borderWidth: 1, borderColor: COLORS.line, borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 4, marginBottom: 10,
+  },
+  secRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10,
+  },
+  secTitle: { color: COLORS.ink, fontSize: 14.5, flex: 1 },
+  secRemove: { color: COLORS.muted2, fontSize: 14, fontWeight: '600' },
+  addRow: { flexDirection: 'row', gap: 8 },
+  addInput: {
+    flex: 1, backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11,
+    color: COLORS.ink, fontSize: 14.5,
+  },
+  addBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingHorizontal: 16, justifyContent: 'center',
+  },
+  addBtnText: { color: COLORS.bg, fontSize: 14, fontWeight: '700' },
+  resetLink: {
+    color: COLORS.espressoLight, fontSize: 13, fontWeight: '600',
+    textAlign: 'center', paddingVertical: 12,
+  },
+
+  // --- guided composer ---
+  guidedWrap: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
+  guidedSection: { marginBottom: 16 },
+  guidedTitle: {
+    color: COLORS.ink, fontSize: 16, fontWeight: '600', fontFamily: SERIF,
+    marginBottom: 7,
+  },
+  guidedInput: {
+    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11,
+    color: COLORS.ink, fontSize: 15, lineHeight: 22, minHeight: 84,
+  },
 
   segment: {
     flexDirection: 'row', backgroundColor: COLORS.panelDeep,
