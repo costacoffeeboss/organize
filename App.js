@@ -331,14 +331,17 @@ export default function App() {
     }]));
   }
 
-  function toggleHabit(id) {
-    const today = todayKey();
+  // Ticks/unticks a day — today by default, or any past day when
+  // backfilling from the edit sheet.
+  function toggleHabit(id, key) {
+    const day = key || todayKey();
+    if (day > todayKey()) return;
     setHabits(onSide((list) =>
       list.map((h) => {
         if (h.id !== id) return h;
         const days = new Set(h.history || []);
-        if (days.has(today)) days.delete(today);
-        else days.add(today);
+        if (days.has(day)) days.delete(day);
+        else days.add(day);
         const history = [...days].sort();
         return {
           ...h, history,
@@ -347,6 +350,15 @@ export default function App() {
         };
       })
     ));
+  }
+
+  // Edit a habit's settings (weekly target); the streak follows suit.
+  function updateHabit(id, fields) {
+    setHabits(onSide((list) => list.map((h) => {
+      if (h.id !== id) return h;
+      const next = { ...h, ...fields };
+      return { ...next, streak: habitStreak(new Set(next.history || []), next.target || 7) };
+    })));
   }
 
   function deleteHabit(id) {
@@ -688,6 +700,7 @@ export default function App() {
                   habits={habits[mode]}
                   addHabit={addHabit}
                   toggleHabit={toggleHabit}
+                  updateHabit={updateHabit}
                   deleteHabit={deleteHabit}
                 />
               )}

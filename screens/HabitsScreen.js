@@ -6,7 +6,7 @@
 //  The floating ＋ adds a new habit.
 //
 //  Row gestures: the checkbox ticks · the row opens analytics ·
-//  a long press deletes.
+//  a long press opens the edit sheet (target · backfill days · delete).
 // =====================================================================
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -137,12 +137,13 @@ function HabitRow({ habit, today, onToggle, onOpen, onLongPress }) {
   );
 }
 
-export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabit }) {
+export default function HabitsScreen({ habits, addHabit, toggleHabit, updateHabit, deleteHabit }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const [showAdd, setShowAdd] = useState(false);
   const [newHabit, setNewHabit] = useState('');
   const [newTarget, setNewTarget] = useState(7); // times per week
   const [openId, setOpenId] = useState(null); // which habit's analytics are open
+  const [editId, setEditId] = useState(null); // which habit's edit sheet is open
   const today = todayKey();
 
   const doneCount = habits.filter((h) => h.lastDone === today).length;
@@ -161,12 +162,18 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
     setShowAdd(false);
   }
 
-  function onLongPress(habit) {
+  function confirmDelete(habit) {
     Alert.alert('Delete habit?', 'Its history will be lost.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteHabit(habit.id) },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => { setEditId(null); deleteHabit(habit.id); },
+      },
     ]);
   }
+
+  const edit = habits.find((h) => h.id === editId);
+  const editDays = edit ? new Set(edit.history || []) : new Set();
 
   const open = habits.find((h) => h.id === openId);
   const openDays = open ? new Set(open.history || []) : new Set();
@@ -203,7 +210,7 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
             No habits yet. Tap ＋ and start with something small —{'\n'}"Read 10 pages" beats "Read more".
           </Text>
         ) : (
-          <Text style={styles.hint}>Tick the box · tap a habit for its story · hold to delete.</Text>
+          <Text style={styles.hint}>Tick the box · tap a habit for its story · hold to edit.</Text>
         )}
         {habits.map((h) => (
           <HabitRow
@@ -212,7 +219,7 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
             today={today}
             onToggle={() => toggleHabit(h.id)}
             onOpen={() => setOpenId(h.id)}
-            onLongPress={() => onLongPress(h)}
+            onLongPress={() => setEditId(h.id)}
           />
         ))}
       </ScrollView>
@@ -262,6 +269,54 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, deleteHabi
             <Text style={styles.primaryBtnText}>Add habit</Text>
           </TouchableOpacity>
         </View>
+      </ModalShell>
+
+      {/* ================= Edit sheet (long press) ================= */}
+      <ModalShell
+        visible={!!edit}
+        onClose={() => setEditId(null)}
+        title={edit ? edit.name : ''}
+      >
+        {edit && (
+          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 560 }}>
+            {/* weekly target */}
+            <Text style={[styles.targetLabel, { marginTop: 0 }]}>How many days a week?</Text>
+            <View style={styles.targetRow}>
+              {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  style={[styles.targetChip, (edit.target || 7) === n && styles.targetChipOn]}
+                  onPress={() => updateHabit(edit.id, { target: n })}
+                >
+                  <Text style={[styles.targetChipText, (edit.target || 7) === n && styles.targetChipTextOn]}>
+                    {n}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.targetHint}>
+              {(edit.target || 7) === 7
+                ? 'Every day — streak counts days.'
+                : `${edit.target}× a week — streak counts weeks you hit it.`}
+            </Text>
+
+            {/* backfill forgotten days */}
+            <Text style={styles.targetLabel}>Fill in missed days</Text>
+            <Text style={styles.editHint}>
+              Forgot to tick one off? Tap the day to mark it done — tap again to undo.
+            </Text>
+            <CalendarPager
+              filled={editDays}
+              maxKey={today}
+              onSelect={(k) => toggleHabit(edit.id, k)}
+            />
+
+            {/* delete, out of the way at the bottom */}
+            <TouchableOpacity style={styles.deleteHabitBtn} onPress={() => confirmDelete(edit)}>
+              <Text style={styles.deleteHabitText}>Delete habit</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
       </ModalShell>
 
       {/* ================= Analytics pop-up ================= */}
@@ -380,6 +435,12 @@ const makeStyles = (COLORS) => StyleSheet.create({
   targetChipText: { color: COLORS.muted, fontSize: 14.5, fontWeight: '700' },
   targetChipTextOn: { color: COLORS.bg },
   targetHint: { color: COLORS.muted2, fontSize: 12.5, marginTop: 8, marginBottom: 4 },
+  editHint: { color: COLORS.muted2, fontSize: 12.5, marginBottom: 10 },
+  deleteHabitBtn: {
+    borderWidth: 1.5, borderColor: COLORS.danger, borderRadius: 14,
+    paddingVertical: 12, alignItems: 'center', marginTop: 16, marginBottom: 4,
+  },
+  deleteHabitText: { color: COLORS.danger, fontSize: 15, fontWeight: '700' },
 
   rowRight: { alignItems: 'flex-end', marginLeft: 10, flexDirection: 'row', gap: 8 },
   streak: { color: COLORS.espressoLight, fontSize: 13.5, fontWeight: '600' },
