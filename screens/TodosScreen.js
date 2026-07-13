@@ -39,7 +39,7 @@ const REPEAT_MODES = [
   { id: 'monthly', label: 'Monthly' },
 ];
 
-export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) {
+export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, deleteTodo }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
 
@@ -48,8 +48,9 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
   const [todoOpen, setTodoOpen] = useState(true);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
 
-  // --- Pop-up state ---
+  // --- Pop-up state (shared by add and hold-to-edit) ---
   const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState(null); // null = adding new
   const [page, setPage] = useState('form'); // 'form' | 'deadline' | 'start'
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState('off');
@@ -59,11 +60,34 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
   const [deadline, setDeadline] = useState(null);
 
   function resetForm() {
-    setPage('form'); setTitle(''); setMode('off');
+    setPage('form'); setTitle(''); setMode('off'); setEditId(null);
     setWeekdays([]); setStartKey(todayKey());
     setMonthDay(new Date().getDate()); setDeadline(null);
   }
   function openAdd() { resetForm(); setShowAdd(true); }
+
+  // Hold a row → the same form, pre-filled with the to-do's setup.
+  function openEdit(t) {
+    resetForm();
+    setEditId(t.id);
+    setTitle(t.title);
+    setDeadline(t.repeat ? null : t.deadline);
+    const r = t.repeat;
+    if (r) {
+      if (r.type === 'weekly') {
+        if (r.days.length === 7) setMode('daily');
+        else { setMode('weekly'); setWeekdays(r.days); }
+      } else if (r.type === 'rolling') {
+        setMode('rollweekly'); setStartKey(r.start || todayKey());
+      } else if (r.type === 'interval') {
+        setMode(r.every === 14 ? 'biweekly' : 'fourweekly');
+        setStartKey(r.start);
+      } else if (r.type === 'monthly') {
+        setMode('monthly'); setMonthDay(r.day);
+      }
+    }
+    setShowAdd(true);
+  }
 
   function chooseMode(id) {
     setMode(id);
@@ -87,15 +111,27 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
     return null;
   }
 
-  function onAdd() {
+  function onSubmit() {
     const t = title.trim();
     if (!t) return;
     if (mode === 'weekly' && weekdays.length === 0) {
       Alert.alert('Pick a day', 'Choose at least one weekday for a weekly repeat.');
       return;
     }
-    addTodo({ title: t, deadline: mode === 'off' ? deadline : null, repeat: buildRepeat() });
+    const payload = { title: t, deadline: mode === 'off' ? deadline : null, repeat: buildRepeat() };
+    if (editId) updateTodo(editId, payload);
+    else addTodo(payload);
     setShowAdd(false);
+  }
+
+  function confirmDelete(id) {
+    Alert.alert('Delete to-do?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => { setShowAdd(false); deleteTodo(id); },
+      },
+    ]);
   }
 
   // --- Sort every to-do into its group ---
@@ -132,12 +168,6 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
     return null;
   }
 
-  function onLongPress(t) {
-    Alert.alert('Delete to-do?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteTodo(t.id) },
-    ]);
-  }
 
   const isDone = (t) => (t.repeat ? t.completedOn === today : t.done);
 
@@ -150,7 +180,7 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
         meta={metaFor(t, group)}
         metaColor={group === 'overdue' ? COLORS.danger : undefined}
         onToggle={() => toggleTodo(t.id)}
-        onLongPress={() => onLongPress(t)}
+        onLongPress={() => openEdit(t)}
       />
     ));
   }
@@ -250,7 +280,7 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
       <ModalShell
         visible={showAdd}
         onClose={() => setShowAdd(false)}
-        title={page === 'form' ? 'New to-do'
+        title={page === 'form' ? (editId ? 'Edit to-do' : 'New to-do')
           : page === 'deadline' ? 'Deadline' : 'Starts on'}
       >
         {page === 'form' && (
@@ -335,11 +365,17 @@ export default function TodosScreen({ todos, addTodo, toggleTodo, deleteTodo }) 
 
             <TouchableOpacity
               style={[styles.primaryBtn, !title.trim() && { opacity: 0.4 }]}
-              onPress={onAdd}
+              onPress={onSubmit}
               disabled={!title.trim()}
             >
-              <Text style={styles.primaryBtnText}>Add to-do</Text>
+              <Text style={styles.primaryBtnText}>{editId ? 'Save changes' : 'Add to-do'}</Text>
             </TouchableOpacity>
+
+            {editId && (
+              <TouchableOpacity style={styles.deleteTodoBtn} onPress={() => confirmDelete(editId)}>
+                <Text style={styles.deleteTodoText}>Delete to-do</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -453,6 +489,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
     paddingVertical: 14, alignItems: 'center', marginTop: 4,
   },
   primaryBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '700' },
+  deleteTodoBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 2 },
+  deleteTodoText: { color: COLORS.danger, fontSize: 14.5, fontWeight: '700' },
 
   pickerBtns: {
     flexDirection: 'row', justifyContent: 'space-between',

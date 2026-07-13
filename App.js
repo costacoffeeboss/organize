@@ -402,6 +402,24 @@ export default function App() {
     })));
   }
 
+  // Edit a to-do in place. The next-due date only resets when the
+  // repeat itself changed — retitling a rolling to-do mustn't bring it
+  // back early.
+  function updateTodo(id, { title, deadline, repeat }) {
+    const today = todayKey();
+    setTodos(onSide((list) => list.map((t) => {
+      if (t.id !== id) return t;
+      const sameRepeat = JSON.stringify(t.repeat || null) === JSON.stringify(repeat || null);
+      return {
+        ...t,
+        title,
+        deadline: deadline || null,
+        repeat: repeat || null,
+        nextDue: repeat ? (sameRepeat ? t.nextDue : nextOccurrence(repeat, today)) : null,
+      };
+    })));
+  }
+
   function deleteTodo(id) {
     setTodos(onSide((list) => list.filter((t) => t.id !== id)));
   }
@@ -667,6 +685,7 @@ export default function App() {
                 <TodosScreen
                   todos={todos[mode]}
                   addTodo={addTodo}
+                  updateTodo={updateTodo}
                   toggleTodo={toggleTodo}
                   deleteTodo={deleteTodo}
                 />
