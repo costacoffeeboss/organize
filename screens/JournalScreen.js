@@ -13,20 +13,39 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, SERIF } from '../theme';
-import { todayKey, niceDate, currentStreak } from '../utils/dates';
+import { todayKey, niceDate, addDays, currentStreak } from '../utils/dates';
 import ScreenHeader from '../components/ScreenHeader';
 import CalendarPager from '../components/CalendarPager';
 import ModalShell from '../components/ModalShell';
 import FullPage from '../components/FullPage';
 import FAB from '../components/FAB';
 
+// tone drives the "3× this week" reflection: good moods get encouraged,
+// bad ones get nudged toward a fix. (The original five keep their ids
+// so older entries still resolve.)
 export const MOODS = [
-  { id: 'driven', label: 'Driven', emoji: '🔥' },
-  { id: 'steady', label: 'Steady', emoji: '☀️' },
-  { id: 'calm', label: 'Calm', emoji: '🌿' },
-  { id: 'tired', label: 'Tired', emoji: '😴' },
-  { id: 'low', label: 'Low', emoji: '🌧️' },
+  { id: 'driven', label: 'Driven', emoji: '🔥', tone: 'good' },
+  { id: 'happy', label: 'Happy', emoji: '😄', tone: 'good' },
+  { id: 'grateful', label: 'Grateful', emoji: '🙏', tone: 'good' },
+  { id: 'excited', label: 'Excited', emoji: '✨', tone: 'good' },
+  { id: 'proud', label: 'Proud', emoji: '🏅', tone: 'good' },
+  { id: 'calm', label: 'Calm', emoji: '🌿', tone: 'good' },
+  { id: 'loved', label: 'Loved', emoji: '🥰', tone: 'good' },
+  { id: 'focused', label: 'Focused', emoji: '🎯', tone: 'good' },
+  { id: 'steady', label: 'Steady', emoji: '☀️', tone: 'good' },
+  { id: 'meh', label: 'Meh', emoji: '😐', tone: 'bad' },
+  { id: 'tired', label: 'Tired', emoji: '😴', tone: 'bad' },
+  { id: 'stressed', label: 'Stressed', emoji: '😖', tone: 'bad' },
+  { id: 'anxious', label: 'Anxious', emoji: '😬', tone: 'bad' },
+  { id: 'overwhelmed', label: 'Overwhelmed', emoji: '🌊', tone: 'bad' },
+  { id: 'sad', label: 'Sad', emoji: '🌧️', tone: 'bad' },
+  { id: 'angry', label: 'Angry', emoji: '😤', tone: 'bad' },
+  { id: 'low', label: 'Low', emoji: '🌫️', tone: 'bad' },
 ];
+
+const moodById = (id) => MOODS.find((m) => m.id === id);
+const moodIdsOf = (entry) =>
+  (entry && (entry.moods || (entry.mood ? [entry.mood] : []))) || [];
 
 // A gentle nudge for the blank page (rotates by day of month).
 const PROMPTS = [
@@ -61,8 +80,16 @@ export default function JournalScreen({
   const [part, setPart] = useState('today'); // 'today' | 'goals'
   const [editingKey, setEditingKey] = useState(null); // day being written/read
   const [draft, setDraft] = useState('');
-  const [mood, setMood] = useState(null);
+  const [draftMoods, setDraftMoods] = useState([]); // multi-select
   const [seedPrompt, setSeedPrompt] = useState(null); // companion question → composer
+
+  // The guided flow: moods → (mood reflections) → one page per section
+  // → the final page where it all ties together. null = plain page.
+  const [flowSteps, setFlowSteps] = useState(null);
+  const [stepIdx, setStepIdx] = useState(0);
+  const [stepText, setStepText] = useState('');
+  const [blocks, setBlocks] = useState([]);     // answered {title, text}, in order
+  const [pageBaseline, setPageBaseline] = useState('');
   const [stepKey, setStepKey] = useState(null); // day whose step is open
   const [stepDraft, setStepDraft] = useState('');
 
@@ -70,9 +97,61 @@ export default function JournalScreen({
   const [showPrefs, setShowPrefs] = useState(false);
   const [newSection, setNewSection] = useState('');
 
-  // The headings, pre-laid on the page with room to write under each.
-  const guidedTemplate = () =>
-    guidedSections.map((s) => `${s.title}\n\n`).join('\n');
+  // --- The guided flow's moving parts ---
+
+  // How often has each currently-selected mood come up in the last
+  // week? (Today's selection counts as one.)
+  function moodWeekCounts() {
+    const counts = {};
+    draftMoods.forEach((id) => { counts[id] = 1; });
+    for (let i = 1; i <= 6; i++) {
+      const e = journal[addDays(today, -i)];
+      moodIdsOf(e).forEach((id) => { if (counts[id] != null) counts[id] += 1; });
+    }
+    return counts;
+  }
+
+  const reflectHeading = (m) =>
+    m.tone === 'good'
+      ? `What's been making you feel ${m.label.toLowerCase()}?`
+      : `What's behind feeling ${m.label.toLowerCase()}?`;
+
+  function stepNext() {
+    const cur = flowSteps[stepIdx];
+    let steps = flowSteps;
+    let newBlocks = blocks;
+
+    if (cur.kind === 'moods') {
+      // A mood that's come up 3+ times this week earns its own moment.
+      const counts = moodWeekCounts();
+      const reflects = draftMoods
+        .filter((id) => counts[id] >= 3)
+        .slice(0, 2)
+        .map((id) => ({ kind: 'reflect', mood: moodById(id), count: counts[id] }));
+      steps = [...flowSteps];
+      steps.splice(stepIdx + 1, 0, ...reflects);
+      setFlowSteps(steps);
+    } else if (stepText.trim()) {
+      const title = cur.kind === 'reflect' ? reflectHeading(cur.mood) : cur.section.title;
+      newBlocks = [...blocks, { title, text: stepText.trim() }];
+      setBlocks(newBlocks);
+    }
+
+    const ni = stepIdx + 1;
+    if (steps[ni].kind === 'page') {
+      // Tie it all together: everything answered, as one open page,
+      // with the final section's heading waiting at the bottom.
+      const lastTitle = guidedSections.length
+        ? guidedSections[guidedSections.length - 1].title
+        : 'Free thoughts';
+      const body = newBlocks.map((b) => `${b.title}\n${b.text}`).join('\n\n');
+      const text = (body ? `${body}\n\n` : '') + `${lastTitle}\n\n`;
+      setDraft(text);
+      setPageBaseline(text);
+    }
+    setStepText('');
+    setStepIdx(ni);
+  }
 
   const entryDays = new Set(Object.keys(journal));
   const streak = currentStreak(entryDays);
@@ -116,22 +195,41 @@ export default function JournalScreen({
   function openDay(key, seed = null) {
     if (key > today) return; // can't journal the future
     const existing = journal[key];
-    setMood(existing ? existing.mood : null);
+    setDraftMoods(moodIdsOf(existing));
     setSeedPrompt(seed);
-    // New entries start from the guided headings (unless the companion
-    // sent a question over); existing entries open exactly as written.
-    setDraft(existing ? existing.text : (guidedOn && !seed ? guidedTemplate() : ''));
+    setBlocks([]);
+    setStepText('');
+    setPageBaseline('');
+    if (!existing && guidedOn && !seed) {
+      // Fresh guided entry → the step-by-step flow.
+      const sectionSteps = guidedSections.slice(0, -1).map((s) => ({ kind: 'section', section: s }));
+      setFlowSteps([{ kind: 'moods' }, ...sectionSteps, { kind: 'page' }]);
+      setStepIdx(0);
+      setDraft('');
+    } else {
+      // Existing entries (and companion questions) open as one page.
+      setFlowSteps(null);
+      setDraft(existing ? existing.text : '');
+    }
     setEditingKey(key);
   }
 
-  // An untouched sheet of headings isn't an entry yet.
+  const currentStep = flowSteps ? flowSteps[stepIdx] : null;
+  const onStepScreens = !!currentStep && currentStep.kind !== 'page';
+
+  // A sheet nobody wrote on isn't an entry yet.
   const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
-  const canSave = !!draft.trim() && (!guidedOn || squash(draft) !== squash(guidedTemplate()));
+  const canSave = !onStepScreens && !!draft.trim() &&
+    (!flowSteps || blocks.length > 0 || squash(draft) !== squash(pageBaseline));
 
   // Style the section titles as real headings while writing: any line
   // that IS one of the guided titles renders bold-italic serif, a
   // touch larger. The text itself stays plain — this is display only.
-  const headingSet = new Set(guidedSections.map((s) => s.title.trim()));
+  // Mood-reflection headings from this session count too.
+  const headingSet = new Set([
+    ...guidedSections.map((s) => s.title.trim()),
+    ...blocks.map((b) => b.title.trim()),
+  ]);
   function styledDraft() {
     const lines = draft.split('\n');
     return lines.map((line, i) => {
@@ -144,8 +242,16 @@ export default function JournalScreen({
 
   function onSave() {
     const text = draft.trim();
-    if (text) saveEntry(editingKey, { text, mood });
+    if (text) {
+      saveEntry(editingKey, { text, mood: draftMoods[0] || null, moods: draftMoods });
+    }
     setEditingKey(null);
+  }
+
+  function toggleMood(id) {
+    setDraftMoods((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    );
   }
 
   // --- Guided-format editing (the settings cog) ---
@@ -169,7 +275,7 @@ export default function JournalScreen({
     ]);
   }
 
-  const moodOf = (key) => MOODS.find((m) => m.id === (journal[key] || {}).mood);
+  const moodsOf = (key) => moodIdsOf(journal[key]).map(moodById).filter(Boolean);
 
   // Dot on every day that has an entry (espresso) / a step (gold).
   const dots = {};
@@ -216,9 +322,10 @@ export default function JournalScreen({
           <TouchableOpacity style={styles.todayCard} onPress={() => openDay(today)} activeOpacity={0.85}>
             <View style={styles.todayHead}>
               <Text style={styles.todayTitle}>Today</Text>
-              {todayEntry && moodOf(today) && (
+              {todayEntry && moodsOf(today).length > 0 && (
                 <Text style={styles.moodTag}>
-                  {moodOf(today).emoji} {moodOf(today).label}
+                  {moodsOf(today).map((m) => m.emoji).join(' ')}
+                  {moodsOf(today).length === 1 ? ` ${moodsOf(today)[0].label}` : ''}
                 </Text>
               )}
             </View>
@@ -351,53 +458,140 @@ export default function JournalScreen({
               <Text style={styles.pageDate}>
                 {editingKey === today ? 'Today' : editingKey ? niceDate(editingKey) : ''}
               </Text>
-              <TouchableOpacity
-                onPress={onSave}
-                disabled={!canSave}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                <Text style={[styles.pageSave, !canSave && { opacity: 0.35 }]}>Save</Text>
-              </TouchableOpacity>
+              {onStepScreens ? (
+                <Text style={styles.stepCount}>{stepIdx + 1} / {flowSteps.length}</Text>
+              ) : (
+                <TouchableOpacity
+                  onPress={onSave}
+                  disabled={!canSave}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Text style={[styles.pageSave, !canSave && { opacity: 0.35 }]}>Save</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            {/* Mood chips */}
-            <View style={styles.moodRow}>
-              {MOODS.map((m) => (
-                <TouchableOpacity
-                  key={m.id}
-                  style={[styles.moodChip, mood === m.id && styles.moodChipOn]}
-                  onPress={() => setMood(mood === m.id ? null : m.id)}
-                >
-                  <Text style={styles.moodEmoji}>{m.emoji}</Text>
-                  <Text style={[styles.moodLabel, mood === m.id && styles.moodLabelOn]}>
-                    {m.label}
+            {onStepScreens ? (
+              /* ---- the guided flow, one step at a time ---- */
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.stepWrap}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {currentStep.kind === 'moods' && (
+                  <View>
+                    <Text style={styles.stepTitle}>How are you feeling?</Text>
+                    <Text style={styles.stepSub}>Pick as many as fit today.</Text>
+                    <View style={styles.moodsGrid}>
+                      {MOODS.map((m) => (
+                        <TouchableOpacity
+                          key={m.id}
+                          style={[styles.moodChip, draftMoods.includes(m.id) && styles.moodChipOn]}
+                          onPress={() => toggleMood(m.id)}
+                        >
+                          <Text style={styles.moodEmoji}>{m.emoji}</Text>
+                          <Text style={[styles.moodLabel, draftMoods.includes(m.id) && styles.moodLabelOn]}>
+                            {m.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {currentStep.kind === 'reflect' && (
+                  <View>
+                    <Text style={styles.stepBadge}>
+                      {currentStep.mood.emoji} {currentStep.count}× this week
+                    </Text>
+                    <Text style={styles.stepTitle}>{reflectHeading(currentStep.mood)}</Text>
+                    <Text style={styles.stepSub}>
+                      {currentStep.mood.tone === 'good'
+                        ? `Feeling ${currentStep.mood.label.toLowerCase()} keeps showing up — that's worth noticing. Name what's behind it so you can keep it coming.`
+                        : `It's come up ${currentStep.count} times in seven days. What do you think is causing it — and what's one small thing you could try to shift it?`}
+                    </Text>
+                    <TextInput
+                      style={styles.stepInput}
+                      placeholder="Write a few honest lines…"
+                      placeholderTextColor={COLORS.muted2}
+                      value={stepText}
+                      onChangeText={setStepText}
+                      multiline
+                      textAlignVertical="top"
+                      autoFocus
+                    />
+                  </View>
+                )}
+
+                {currentStep.kind === 'section' && (
+                  <View>
+                    <Text style={styles.stepTitle}>{currentStep.section.title}</Text>
+                    <TextInput
+                      style={styles.stepInput}
+                      placeholder="Write freely — or skip."
+                      placeholderTextColor={COLORS.muted2}
+                      value={stepText}
+                      onChangeText={setStepText}
+                      multiline
+                      textAlignVertical="top"
+                      autoFocus
+                    />
+                  </View>
+                )}
+
+                <TouchableOpacity style={styles.stepBtn} onPress={stepNext} activeOpacity={0.85}>
+                  <Text style={styles.stepBtnText}>
+                    {currentStep.kind === 'moods' || stepText.trim() ? 'Next' : 'Skip'}
                   </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+              </ScrollView>
+            ) : (
+              /* ---- the open page ---- */
+              <View style={{ flex: 1 }}>
+                {/* Mood chips — pick as many as apply */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.moodScroller}
+                  contentContainerStyle={styles.moodRow}
+                >
+                  {MOODS.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[styles.moodChip, draftMoods.includes(m.id) && styles.moodChipOn]}
+                      onPress={() => toggleMood(m.id)}
+                    >
+                      <Text style={styles.moodEmoji}>{m.emoji}</Text>
+                      <Text style={[styles.moodLabel, draftMoods.includes(m.id) && styles.moodLabelOn]}>
+                        {m.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
 
-            {/* The page itself — all remaining space is one open sheet.
-                With guided journaling on, the section headings are
-                already laid on it, ready to be written under. If the
-                companion asked something, its question is the prompt. */}
-            <TextInput
-              style={styles.page}
-              placeholder={seedPrompt || prompt}
-              placeholderTextColor={COLORS.muted2}
-              onChangeText={setDraft}
-              multiline
-              textAlignVertical="top"
-              autoFocus
-              scrollEnabled
-            >
-              {draft ? <Text style={styles.pageBase}>{styledDraft()}</Text> : null}
-            </TextInput>
+                {/* One open sheet — with guided headings styled in place.
+                    If the companion asked something, its question is the prompt. */}
+                <TextInput
+                  style={styles.page}
+                  placeholder={seedPrompt || prompt}
+                  placeholderTextColor={COLORS.muted2}
+                  onChangeText={setDraft}
+                  multiline
+                  textAlignVertical="top"
+                  autoFocus
+                  scrollEnabled
+                >
+                  {draft ? <Text style={styles.pageBase}>{styledDraft()}</Text> : null}
+                </TextInput>
 
-            {/* Delete lives quietly at the foot of existing entries */}
-            {journal[editingKey] && (
-              <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
-                <Text style={styles.deleteBtn}>Delete entry</Text>
-              </TouchableOpacity>
+                {/* Delete lives quietly at the foot of existing entries */}
+                {journal[editingKey] && (
+                  <TouchableOpacity onPress={onDelete} style={styles.deleteRow}>
+                    <Text style={styles.deleteBtn}>Delete entry</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </KeyboardAvoidingView>
         </FullPage>
@@ -573,10 +767,36 @@ const makeStyles = (COLORS) => StyleSheet.create({
   pageDate: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF },
   pageSave: { color: COLORS.espresso, fontSize: 16, fontWeight: '700' },
 
-  moodRow: {
-    flexDirection: 'row', gap: 7, flexWrap: 'wrap',
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6,
+  moodScroller: { flexGrow: 0, marginTop: 12, marginBottom: 4 },
+  moodRow: { flexDirection: 'row', gap: 7, paddingHorizontal: 20, alignItems: 'center' },
+
+  // --- the guided flow's step screens ---
+  stepWrap: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 30 },
+  stepCount: { color: COLORS.muted2, fontSize: 13.5, fontWeight: '700' },
+  stepBadge: {
+    alignSelf: 'flex-start', color: COLORS.espressoLight,
+    fontSize: 12.5, fontWeight: '800', letterSpacing: 0.3,
+    borderWidth: 1, borderColor: COLORS.lineStrong, borderRadius: 999,
+    paddingHorizontal: 11, paddingVertical: 4, marginBottom: 12,
+    backgroundColor: COLORS.panel,
   },
+  stepTitle: {
+    color: COLORS.ink, fontSize: 23, lineHeight: 30, fontWeight: '600',
+    fontFamily: SERIF,
+  },
+  stepSub: { color: COLORS.muted, fontSize: 14.5, lineHeight: 21, marginTop: 8 },
+  moodsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 18 },
+  stepInput: {
+    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 16, paddingHorizontal: 16, paddingVertical: 13,
+    color: COLORS.ink, fontSize: 16, lineHeight: 24, minHeight: 170,
+    marginTop: 16,
+  },
+  stepBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingVertical: 15, alignItems: 'center', marginTop: 22,
+  },
+  stepBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '700' },
   moodChip: {
     alignItems: 'center', borderWidth: 1, borderColor: COLORS.lineStrong,
     borderRadius: 12, paddingVertical: 7, paddingHorizontal: 10,

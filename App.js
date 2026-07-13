@@ -459,10 +459,12 @@ export default function App() {
 
   // ================= Journal actions =================
 
-  function saveEntry(key, { text, mood, guided }) {
+  // `moods` is the multi-select list; `mood` stays as its first item
+  // so anything reading the old single-mood shape keeps working.
+  function saveEntry(key, { text, mood, moods }) {
     setJournal(onSide((entries) => ({
       ...entries,
-      [key]: { text, mood: mood || null, guided: guided || null },
+      [key]: { text, mood: mood || null, moods: moods || null },
     })));
   }
 
