@@ -128,6 +128,20 @@ export default function JournalScreen({
   const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
   const canSave = !!draft.trim() && (!guidedOn || squash(draft) !== squash(guidedTemplate()));
 
+  // Style the section titles as real headings while writing: any line
+  // that IS one of the guided titles renders bold-italic serif, a
+  // touch larger. The text itself stays plain — this is display only.
+  const headingSet = new Set(guidedSections.map((s) => s.title.trim()));
+  function styledDraft() {
+    const lines = draft.split('\n');
+    return lines.map((line, i) => {
+      const text = i < lines.length - 1 ? `${line}\n` : line;
+      return headingSet.has(line.trim()) && line.trim()
+        ? <Text key={i} style={styles.pageHeading}>{text}</Text>
+        : <Text key={i}>{text}</Text>;
+    });
+  }
+
   function onSave() {
     const text = draft.trim();
     if (text) saveEntry(editingKey, { text, mood });
@@ -370,13 +384,14 @@ export default function JournalScreen({
               style={styles.page}
               placeholder={seedPrompt || prompt}
               placeholderTextColor={COLORS.muted2}
-              value={draft}
               onChangeText={setDraft}
               multiline
               textAlignVertical="top"
               autoFocus
               scrollEnabled
-            />
+            >
+              {draft ? <Text style={styles.pageBase}>{styledDraft()}</Text> : null}
+            </TextInput>
 
             {/* Delete lives quietly at the foot of existing entries */}
             {journal[editingKey] && (
@@ -575,6 +590,11 @@ const makeStyles = (COLORS) => StyleSheet.create({
   page: {
     flex: 1, color: COLORS.ink, fontSize: 16.5, lineHeight: 25,
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16,
+  },
+  pageBase: { color: COLORS.ink, fontSize: 16.5, lineHeight: 25 },
+  pageHeading: {
+    color: COLORS.ink, fontSize: 19, lineHeight: 28,
+    fontWeight: '700', fontStyle: 'italic', fontFamily: SERIF,
   },
 
   deleteRow: { alignItems: 'center', paddingVertical: 12 },
