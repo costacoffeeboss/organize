@@ -47,6 +47,25 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
   // Upcoming starts closed (it's a glance, not a burden).
   const [todoOpen, setTodoOpen] = useState(true);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
+  const [completedOpen, setCompletedOpen] = useState(false);
+  // A just-ticked to-do lingers a beat so its checkmark is seen before
+  // it tidies into the Completed drop-down.
+  const [lingering, setLingering] = useState({});
+
+  function handleToggle(t) {
+    const wasDone = t.repeat ? t.completedOn === today : t.done;
+    toggleTodo(t.id);
+    if (!wasDone) {
+      setLingering((p) => ({ ...p, [t.id]: true }));
+      setTimeout(() => {
+        setLingering((p) => {
+          const next = { ...p };
+          delete next[t.id];
+          return next;
+        });
+      }, 900);
+    }
+  }
 
   // --- Pop-up state (shared by add and hold-to-edit) ---
   const [showAdd, setShowAdd] = useState(false);
@@ -135,17 +154,21 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
   }
 
   // --- Sort every to-do into its group ---
-  const overdue = [], todayList = [], todoList = [], upcomingAll = [];
+  // Anything completed today tucks into Completed (after a brief linger
+  // so the tick is seen). Everything else routes as before.
+  const overdue = [], todayList = [], todoList = [], upcomingAll = [], completedList = [];
   todos.forEach((t) => {
+    const doneToday = (t.repeat ? t.completedOn === today : t.done) && !lingering[t.id];
+    if (doneToday) { completedList.push(t); return; }
     if (t.repeat) {
       // Repeatables live in To-do while due; once ticked they hide
       // until they come around again (their next date shows in Upcoming).
-      if (t.completedOn !== today && t.nextDue <= today) todoList.push(t);
+      if (t.nextDue <= today) todoList.push(t);
       else upcomingAll.push(t);
       return;
     }
     if (t.deadline) {
-      if (t.done || t.deadline === today) todayList.push(t);      // due (or finished) today
+      if (t.deadline === today) todayList.push(t);      // due today
       else if (t.deadline < today) overdue.push(t);
       else upcomingAll.push(t);
       return;
@@ -179,7 +202,7 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
         done={isDone(t)}
         meta={metaFor(t, group)}
         metaColor={group === 'overdue' ? COLORS.danger : undefined}
-        onToggle={() => toggleTodo(t.id)}
+        onToggle={() => handleToggle(t)}
         onLongPress={() => openEdit(t)}
       />
     ));
@@ -270,6 +293,19 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
                 ? renderRows(upcoming, 'upcoming')
                 : <Text style={styles.quiet}>Nothing on the horizon.</Text>
             )}
+          </View>
+        )}
+
+        {/* --- Completed today (expandable) --- */}
+        {!empty && completedList.length > 0 && (
+          <View>
+            <GroupHead
+              label="Completed"
+              count={completedList.length}
+              open={completedOpen}
+              onPress={() => setCompletedOpen(!completedOpen)}
+            />
+            {completedOpen && renderRows(completedList, 'completed')}
           </View>
         )}
       </ScrollView>

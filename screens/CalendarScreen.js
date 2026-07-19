@@ -22,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
-  todayKey, monthLabel, shortDate, monthCells, repeatOccursOn,
+  todayKey, dateKey, monthLabel, shortDate, monthCells, repeatOccursOn,
   reminderOccursOn, eventOccursOn, weekStartKey, addDays, parseKey,
   WEEKDAY_LETTERS,
 } from '../utils/dates';
@@ -41,6 +41,11 @@ const MINUTES = ['00', '15', '30', '45'];
 const CAL_CELL_H = 84;
 const CAL_TITLE_H = 38;
 const CAL_MONTH_H = CAL_TITLE_H + 6 * CAL_CELL_H;
+// Ribbon lanes stacked under the day number within each week row.
+const CAL_LANE_TOP = 20;
+const CAL_LANE_H = 15;
+const CAL_BAR_H = 13;
+const CAL_MAX_LANES = 3;
 
 export default function CalendarScreen({
   mode, todos, toggleTodo, events, deviceEvents, addEvent, deleteEvent, unshareEvent,
@@ -161,6 +166,64 @@ export default function CalendarScreen({
       text: { color: p.espresso },
     };
   };
+
+  // Lane-packed ribbons for one week (7 Mon-first keys, inMonth flags).
+  // Multi-day events collapse into a single continuous bar; reminders
+  // and to-dos are single-day. Longer/earlier bars take the top lanes,
+  // and anything past CAL_MAX_LANES becomes a "+n" on its days.
+  function weekSegments(weekDays, inMonth) {
+    const segs = [];
+
+    // events (own + shared + phone) — the only multi-day kind
+    [...events.filter(visible), ...deviceEvents].forEach((e) => {
+      const end = e.endDate && e.endDate > e.date ? e.endDate : e.date;
+      let s = -1, en = -1;
+      for (let d = 0; d < 7; d++) {
+        if (inMonth[d] && weekDays[d] >= e.date && weekDays[d] <= end) {
+          if (s < 0) s = d;
+          en = d;
+        }
+      }
+      if (s < 0) return;
+      segs.push({
+        key: `e${e.id}`, kind: 'event', owner: e.owner, device: e.device,
+        title: e.title, s, en,
+        contLeft: e.date < weekDays[s], contRight: end > weekDays[en],
+      });
+    });
+
+    // reminders — single day
+    reminders.filter(visible).forEach((r) => {
+      for (let d = 0; d < 7; d++) {
+        if (inMonth[d] && reminderOccursOn(r, weekDays[d])) {
+          segs.push({ key: `r${r.id}-${d}`, kind: 'reminder', owner: r.owner, title: r.title, s: d, en: d });
+        }
+      }
+    });
+
+    // to-dos — single day
+    for (let d = 0; d < 7; d++) {
+      if (!inMonth[d]) continue;
+      todosOn(weekDays[d]).forEach((t) => {
+        segs.push({ key: `t${t.id}-${d}`, kind: 'todo', owner: mode, title: t.title, s: d, en: d });
+      });
+    }
+
+    segs.sort((a, b) => a.s - b.s || (b.en - b.s) - (a.en - a.s));
+    const laneEnd = [];
+    segs.forEach((seg) => {
+      let lane = 0;
+      while (lane < laneEnd.length && laneEnd[lane] >= seg.s) lane++;
+      seg.lane = lane;
+      laneEnd[lane] = seg.en;
+    });
+
+    const overflow = [0, 0, 0, 0, 0, 0, 0];
+    segs.forEach((seg) => {
+      if (seg.lane >= CAL_MAX_LANES) for (let d = seg.s; d <= seg.en; d++) overflow[d]++;
+    });
+    return { bars: segs.filter((seg) => seg.lane < CAL_MAX_LANES), overflow };
+  }
 
   function pickDayAndClose(key) {
     setSelected(key);
@@ -616,63 +679,104 @@ export default function CalendarScreen({
                 viewabilityConfig={viewCfg}
                 showsVerticalScrollIndicator={false}
                 renderItem={({ item }) => {
-                  const cells = monthCells(item.year, item.month);
-                  while (cells.length < 42) cells.push(null); // constant height
+                  // Six week-rows of real date keys (Monday-first), so a
+                  // spanning event can be drawn as one continuous bar.
+                  const firstOfMonth = new Date(item.year, item.month, 1);
+                  const startOffset = (firstOfMonth.getDay() + 6) % 7;
+                  const gridStart = addDays(dateKey(firstOfMonth), -startOffset);
                   const weeks = [];
-                  for (let i = 0; i < 42; i += 7) weeks.push(cells.slice(i, i + 7));
+                  for (let w = 0; w < 6; w++) {
+                    const days = [];
+                    for (let d = 0; d < 7; d++) days.push(addDays(gridStart, w * 7 + d));
+                    weeks.push(days);
+                  }
                   return (
                     <View style={{ height: CAL_MONTH_H }}>
                       <Text style={styles.bigMonthTitle}>{monthLabel(item.year, item.month)}</Text>
-                      {weeks.map((week, wi) => (
-                        <View key={wi} style={styles.bigRow}>
-                          {week.map((cell, ci) => {
-                            if (!cell) return <View key={ci} style={styles.bigCell} />;
-                            const items = itemsOn(cell.key);
-                            const isToday = cell.key === today;
-                            return (
-                              <TouchableOpacity
-                                key={ci}
-                                style={[styles.bigCell, cell.key === selected && styles.bigCellSel]}
-                                onPress={() => pickDayAndClose(cell.key)}
-                                activeOpacity={0.7}
-                              >
-                                <Text style={[styles.bigDayNum, isToday && styles.bigDayToday]}>
-                                  {cell.day}
-                                </Text>
-                                {items.slice(0, 3).map((it) => {
-                                  const away = !it.device && it.kind !== 'todo' && foreign(it.owner);
-                                  const f = away ? foreignRibbon(it.owner) : null;
-                                  return (
-                                    <View key={it.id} style={[
-                                      styles.ribbon,
-                                      it.kind === 'event' && styles.ribbonEvent,
-                                      it.kind === 'reminder' && styles.ribbonReminder,
-                                      it.kind === 'todo' && styles.ribbonTodo,
+                      {weeks.map((week, wi) => {
+                        const inMonth = week.map((k) => parseKey(k).getMonth() === item.month);
+                        const { bars, overflow } = weekSegments(week, inMonth);
+                        return (
+                          <View key={wi} style={styles.bigRow}>
+                            {/* day cells: numbers, borders, selection, taps */}
+                            <View style={styles.bigCellRow}>
+                              {week.map((k, d) => (
+                                <TouchableOpacity
+                                  key={d}
+                                  style={[styles.bigCell, k === selected && inMonth[d] && styles.bigCellSel]}
+                                  onPress={() => inMonth[d] && pickDayAndClose(k)}
+                                  activeOpacity={0.7}
+                                  disabled={!inMonth[d]}
+                                >
+                                  {inMonth[d] && (
+                                    <Text style={[styles.bigDayNum, k === today && styles.bigDayToday]}>
+                                      {parseKey(k).getDate()}
+                                    </Text>
+                                  )}
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+
+                            {/* ribbons laid over the row — continuous across days */}
+                            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                              {bars.map((seg) => {
+                                const away = seg.kind === 'event' && !seg.device && foreign(seg.owner);
+                                const f = away ? foreignRibbon(seg.owner) : null;
+                                return (
+                                  <View
+                                    key={seg.key}
+                                    style={{
+                                      position: 'absolute',
+                                      left: `${(seg.s / 7) * 100}%`,
+                                      width: `${((seg.en - seg.s + 1) / 7) * 100}%`,
+                                      top: CAL_LANE_TOP + seg.lane * CAL_LANE_H,
+                                      paddingHorizontal: 1.5,
+                                    }}
+                                  >
+                                    <View style={[
+                                      styles.bar,
+                                      seg.kind === 'event' && styles.ribbonEvent,
+                                      seg.kind === 'reminder' && styles.ribbonReminder,
+                                      seg.kind === 'todo' && styles.ribbonTodo,
                                       away && f.box,
-                                      it.device && styles.ribbonDevice,
+                                      seg.device && styles.ribbonDevice,
+                                      seg.contLeft && styles.barContLeft,
+                                      seg.contRight && styles.barContRight,
                                     ]}>
-                                      <Text
-                                        style={[
-                                          styles.ribbonText,
-                                          it.kind === 'todo' && styles.ribbonTextTodo,
-                                          away && f.text,
-                                          it.device && styles.ribbonTextDevice,
-                                        ]}
-                                        numberOfLines={1}
-                                      >
-                                        {it.title}
-                                      </Text>
+                                      {!seg.contLeft && (
+                                        <Text
+                                          style={[
+                                            styles.ribbonText,
+                                            seg.kind === 'todo' && styles.ribbonTextTodo,
+                                            away && f.text,
+                                            seg.device && styles.ribbonTextDevice,
+                                          ]}
+                                          numberOfLines={1}
+                                        >
+                                          {seg.title}
+                                        </Text>
+                                      )}
                                     </View>
-                                  );
-                                })}
-                                {items.length > 3 && (
-                                  <Text style={styles.moreText}>+{items.length - 3}</Text>
-                                )}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      ))}
+                                  </View>
+                                );
+                              })}
+                              {overflow.map((n, d) => n > 0 && (
+                                <Text
+                                  key={`o${d}`}
+                                  style={[styles.moreText, {
+                                    position: 'absolute',
+                                    left: `${(d / 7) * 100}%`,
+                                    width: `${100 / 7}%`,
+                                    top: CAL_LANE_TOP + CAL_MAX_LANES * CAL_LANE_H,
+                                  }]}
+                                >
+                                  +{n}
+                                </Text>
+                              ))}
+                            </View>
+                          </View>
+                        );
+                      })}
                     </View>
                   );
                 }}
@@ -795,7 +899,8 @@ const makeStyles = (COLORS) => {
     height: CAL_TITLE_H, color: COLORS.ink, fontSize: 17, fontWeight: '600',
     fontFamily: SERIF, paddingLeft: 8, paddingTop: 12,
   },
-  bigRow: { height: CAL_CELL_H, flexDirection: 'row' },
+  bigRow: { height: CAL_CELL_H },
+  bigCellRow: { flexDirection: 'row', height: CAL_CELL_H },
   bigCell: {
     flex: 1, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.lineStrong,
     paddingTop: 4, paddingHorizontal: 2, overflow: 'hidden',
@@ -806,7 +911,13 @@ const makeStyles = (COLORS) => {
     textAlign: 'center', marginBottom: 3,
   },
   bigDayToday: { color: COLORS.espresso, fontWeight: '800' },
-  ribbon: { borderRadius: 4, paddingHorizontal: 4, paddingVertical: 2, marginBottom: 2 },
+  // a spanning ribbon segment (positioned per week over the day cells)
+  bar: {
+    height: CAL_BAR_H, borderRadius: 4, paddingHorizontal: 5,
+    justifyContent: 'center', overflow: 'hidden',
+  },
+  barContLeft: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
+  barContRight: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
   ribbonEvent: { backgroundColor: COLORS.espresso },
   ribbonReminder: { backgroundColor: COLORS.gold },
   ribbonTodo: { backgroundColor: `rgba(${tint},0.08)`, borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.lineStrong },
