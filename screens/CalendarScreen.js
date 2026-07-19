@@ -743,19 +743,19 @@ export default function CalendarScreen({
                                       seg.contLeft && styles.barContLeft,
                                       seg.contRight && styles.barContRight,
                                     ]}>
-                                      {!seg.contLeft && (
-                                        <Text
-                                          style={[
-                                            styles.ribbonText,
-                                            seg.kind === 'todo' && styles.ribbonTextTodo,
-                                            away && f.text,
-                                            seg.device && styles.ribbonTextDevice,
-                                          ]}
-                                          numberOfLines={1}
-                                        >
-                                          {seg.title}
-                                        </Text>
-                                      )}
+                                      {/* label at the start of every row a
+                                          multi-day event runs across */}
+                                      <Text
+                                        style={[
+                                          styles.ribbonText,
+                                          seg.kind === 'todo' && styles.ribbonTextTodo,
+                                          away && f.text,
+                                          seg.device && styles.ribbonTextDevice,
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {seg.title}
+                                      </Text>
                                     </View>
                                   </View>
                                 );
