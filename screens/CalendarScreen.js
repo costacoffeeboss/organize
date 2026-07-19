@@ -12,12 +12,13 @@
 //  stays black-and-silver inside cream Life, and vice versa.
 // =====================================================================
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert,
   FlatList, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
@@ -35,6 +36,7 @@ import FAB from '../components/FAB';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
+const SHOW_TODOS_KEY = '@organize_cal_show_todos_v1';
 
 // Fixed geometry for the endless month scroll (Apple-Calendar style):
 // every month renders 6 week-rows tall so scroll positions are exact.
@@ -67,8 +69,22 @@ export default function CalendarScreen({
   const [expMode, setExpMode] = useState('month'); // 'month' | 'week'
   const [weekAnchor, setWeekAnchor] = useState(today);
 
-  // Calendar-tab settings (the cog): phone-calendar mirroring.
+  // Calendar-tab settings (the cog): phone-calendar mirroring + whether
+  // to-do due-dates show on the calendar (on by default).
   const [showPrefs, setShowPrefs] = useState(false);
+  const [showTodos, setShowTodos] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem(SHOW_TODOS_KEY)
+      .then((v) => { if (v === '0') setShowTodos(false); })
+      .catch(() => {});
+  }, []);
+  function toggleShowTodos() {
+    setShowTodos((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem(SHOW_TODOS_KEY, next ? '1' : '0').catch(() => {});
+      return next;
+    });
+  }
 
   // --- Add pop-up state ---
   const [showAdd, setShowAdd] = useState(false);
@@ -121,6 +137,7 @@ export default function CalendarScreen({
   const visible = (x) => x.owner === mode || x.shared;
 
   function todosOn(key) {
+    if (!showTodos) return [];
     return todos.filter((t) =>
       t.repeat
         ? (t.repeat.type === 'rolling' ? t.nextDue === key : repeatOccursOn(t.repeat, key))
@@ -586,6 +603,18 @@ export default function CalendarScreen({
         title="Calendar settings"
       >
         <View>
+          <TouchableOpacity style={styles.prefRow} onPress={toggleShowTodos} activeOpacity={0.75}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prefTitle}>Show to-dos</Text>
+              <Text style={styles.prefHint}>
+                To-do due dates and repeats appear on the calendar.
+              </Text>
+            </View>
+            <View style={[styles.toggle, showTodos && styles.toggleOn]}>
+              <View style={[styles.knob, showTodos && styles.knobOn]} />
+            </View>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.prefRow} onPress={onToggleDeviceCal} activeOpacity={0.75}>
             <View style={{ flex: 1 }}>
               <Text style={styles.prefTitle}>Show phone calendar</Text>
