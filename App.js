@@ -35,8 +35,9 @@ import {
   todayKey, addDays, parseKey, weekdayIndex,
   nextOccurrence, currentStreak, weekStreak,
 } from './utils/dates';
+import * as Notifications from 'expo-notifications';
 import { ensureCalendarPermission, fetchDeviceEvents } from './utils/deviceCalendar';
-import { ensureNotifyPermission, rescheduleMorningDigests } from './utils/notify';
+import { ensureNotifyPermission, rescheduleReminders } from './utils/notify';
 import HomeScreen from './screens/HomeScreen';
 import TodosScreen from './screens/TodosScreen';
 import CalendarScreen from './screens/CalendarScreen';
@@ -62,6 +63,8 @@ const DEVICE_CAL_KEY = '@organize_device_cal_v1';
 const DEVICE_CAL_ALL_KEY = '@organize_device_cal_all_v1';
 const GUIDED_ON_KEY = '@organize_journal_guided_v1';
 const GUIDED_SECTIONS_KEY = '@organize_journal_sections_v1';
+const RUNDOWN_LIFE_KEY = '@organize_rundowns_life_v1';
+const RUNDOWN_WORK_KEY = '@organize_rundowns_work_v1';
 const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
@@ -148,12 +151,16 @@ export default function App() {
   const [notifyOn, setNotifyOn] = useState(false);
   const [guidedOn, setGuidedOn] = useState(false);
   const [guidedSections, setGuidedSections] = useState(DEFAULT_GUIDED_SECTIONS);
+  // Morning rundown / evening recap, one record per day, per side.
+  const [rundowns, setRundowns] = useState({ life: {}, work: {} });
+  const [launchFlow, setLaunchFlow] = useState(null); // 'morning' | 'evening' from a tapped notification
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
   const [journalSeed, setJournalSeed] = useState(null); // companion → journal prompt
   const [loaded, setLoaded] = useState(false);
 
   const palette = mode === 'work' ? WORK : LIFE;
+  const navRef = useRef(null);
 
   // Updates one side of a { life, work } store, leaving the other alone.
   const onSide = (fn) => (prev) => ({ ...prev, [mode]: fn(prev[mode]) });
@@ -168,6 +175,7 @@ export default function App() {
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
           WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
           DEVICE_CAL_ALL_KEY, GUIDED_ON_KEY, GUIDED_SECTIONS_KEY,
+          RUNDOWN_LIFE_KEY, RUNDOWN_WORK_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -198,6 +206,7 @@ export default function App() {
         if (Array.isArray(savedSections) && savedSections.length) {
           setGuidedSections(savedSections);
         }
+        setRundowns({ life: val(21) || {}, work: val(22) || {} });
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -237,6 +246,10 @@ export default function App() {
     if (!loaded) return;
     save(STEPS_KEY, steps.life); save(WORK_STEPS_KEY, steps.work);
   }, [steps, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    save(RUNDOWN_LIFE_KEY, rundowns.life); save(RUNDOWN_WORK_KEY, rundowns.work);
+  }, [rundowns, loaded]);
 
   // ================= Phone calendar & morning digests =================
 
@@ -257,11 +270,26 @@ export default function App() {
     AsyncStorage.setItem(DEVICE_CAL_ALL_KEY, next ? '1' : '0').catch(() => {});
   }
 
-  // Replan the 8am digests whenever events change (or the toggle flips).
+  // Keep the 7am/7pm rundown reminders in sync with the toggle.
   useEffect(() => {
     if (!loaded) return;
-    rescheduleMorningDigests(events, notifyOn);
-  }, [events, notifyOn, loaded]);
+    rescheduleReminders(notifyOn);
+  }, [notifyOn, loaded]);
+
+  // Tapping a rundown notification opens straight into that flow.
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+      const flow = resp?.notification?.request?.content?.data?.flow;
+      if (flow) { setLaunchFlow(flow); navRef.current?.navigate?.('Home'); }
+    });
+    Notifications.getLastNotificationResponseAsync()
+      .then((resp) => {
+        const flow = resp?.notification?.request?.content?.data?.flow;
+        if (flow) setLaunchFlow(flow);
+      })
+      .catch(() => {});
+    return () => sub.remove();
+  }, []);
 
   async function toggleDeviceCal() {
     if (deviceCalOn) {
@@ -468,6 +496,21 @@ export default function App() {
     })));
   }
 
+  // ================= Morning rundown / evening recap =================
+
+  function saveMorningRundown(key, { intention, focusIds }) {
+    setRundowns(onSide((map) => ({
+      ...map,
+      [key]: { ...(map[key] || {}), intention: intention || '', focusIds: focusIds || [], morningDone: true },
+    })));
+  }
+  function saveEveningRundown(key, { achieved, reflection }) {
+    setRundowns(onSide((map) => ({
+      ...map,
+      [key]: { ...(map[key] || {}), achieved: achieved || null, reflection: reflection || '', eveningDone: true },
+    })));
+  }
+
   // Guided-journal preferences (shared across Life and Work).
   function toggleGuided() {
     const next = !guidedOn;
@@ -576,6 +619,7 @@ export default function App() {
     setMode('life');
     setDeviceCalOn(false); setDeviceCalAll(false); setDeviceEvents([]); setNotifyOn(false);
     setGuidedOn(false); setGuidedSections(DEFAULT_GUIDED_SECTIONS);
+    setRundowns({ life: {}, work: {} }); setLaunchFlow(null);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -631,7 +675,7 @@ export default function App() {
           style={{ flex: 1, backgroundColor: palette.panel }}
           edges={['bottom']}
         >
-          <NavigationContainer theme={navTheme}>
+          <NavigationContainer theme={navTheme} ref={navRef}>
             <Tab.Navigator
               tabBarPosition="bottom"
               screenOptions={({ route }) => ({
@@ -673,12 +717,18 @@ export default function App() {
                   reminders={reminders}
                   journal={journal[mode]}
                   toggleTodo={toggleTodo}
+                  toggleHabit={toggleHabit}
                   onSeedJournal={setJournalSeed}
                   onUpdateName={updateName}
                   onResetAll={resetAllData}
                   onSwitchMode={switchMode}
                   notifyOn={notifyOn}
                   onToggleNotify={toggleNotify}
+                  rundown={rundowns[mode]}
+                  onSaveMorning={saveMorningRundown}
+                  onSaveEvening={saveEveningRundown}
+                  launchFlow={launchFlow}
+                  onFlowConsumed={() => setLaunchFlow(null)}
                 />
               )}
             </Tab.Screen>

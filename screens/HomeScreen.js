@@ -15,7 +15,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, ScrollView, Alert, Modal,
+  KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +34,7 @@ import CompanionCard from '../components/CompanionCard';
 import ProgressRing from '../components/ProgressRing';
 import TodoRow from '../components/TodoRow';
 import ModalShell from '../components/ModalShell';
+import FullPage from '../components/FullPage';
 import Rise from '../components/Rise';
 
 const DISMISSED_KEY = '@organize_dismissed_notices';
@@ -76,8 +78,9 @@ function SwitchMark({ target, onPress }) {
 
 export default function HomeScreen({
   name, mode, habits, todos, events, deviceEvents, reminders, journal, toggleTodo,
-  onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
+  toggleHabit, onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
   notifyOn, onToggleNotify,
+  rundown, onSaveMorning, onSaveEvening, launchFlow, onFlowConsumed,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const navigation = useNavigation();
@@ -86,6 +89,13 @@ export default function HomeScreen({
   const [showSettings, setShowSettings] = useState(false);
   const [showSwitch, setShowSwitch] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+
+  // --- Morning rundown / evening recap ---
+  const [flow, setFlow] = useState(null);            // 'morning' | 'evening' | null
+  const [intentionDraft, setIntentionDraft] = useState('');
+  const [focusDraft, setFocusDraft] = useState([]);  // starred to-do ids
+  const [achievedDraft, setAchievedDraft] = useState(null); // 'yes'|'partly'|'no'
+  const [reflectionDraft, setReflectionDraft] = useState('');
 
   const otherMode = mode === 'life' ? 'work' : 'life';
 
@@ -190,6 +200,55 @@ export default function HomeScreen({
   ]);
   const hideJournalCard = !!notice && JOURNAL_KINDS.has(notice.kind) && !todayEntry;
 
+  // --- Rundown windows: large 6–10am / 6–10pm, collapsed otherwise ---
+  const hour = new Date().getHours();
+  const phase = hour >= 6 && hour < 10 ? 'morning'
+    : hour >= 18 && hour < 22 ? 'evening' : 'off';
+  const collapsedKind = hour >= 12 && hour < 22 ? 'evening' : 'morning';
+  const rd = (rundown || {})[today] || {};
+
+  // To-dos you can act on today (overdue + due, not yet done).
+  const actionable = [...overdueTodos, ...dueTodos.filter((t) => !isTodoDone(t))];
+  const focusTodos = actionable; // starred in the morning
+
+  function openMorning() {
+    setIntentionDraft(rd.intention || '');
+    setFocusDraft(rd.focusIds || []);
+    setFlow('morning');
+  }
+  function openEvening() {
+    setAchievedDraft(rd.achieved || null);
+    setReflectionDraft(rd.reflection || '');
+    setFlow('evening');
+  }
+  function toggleFocus(id) {
+    setFocusDraft((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id)
+        : prev.length >= 3 ? prev : [...prev, id]
+    );
+  }
+  function saveMorning() {
+    onSaveMorning(today, { intention: intentionDraft.trim(), focusIds: focusDraft });
+    setFlow(null);
+  }
+  function saveEvening() {
+    onSaveEvening(today, { achieved: achievedDraft, reflection: reflectionDraft.trim() });
+    setFlow(null);
+  }
+
+  // A tapped 7am/7pm notification opens straight into its flow.
+  useEffect(() => {
+    if (launchFlow === 'morning') { openMorning(); onFlowConsumed(); }
+    else if (launchFlow === 'evening') { openEvening(); onFlowConsumed(); }
+  }, [launchFlow]);
+
+  const ACHIEVED = [
+    { id: 'yes', label: 'Yes', emoji: '🎯' },
+    { id: 'partly', label: 'Partly', emoji: '🌤️' },
+    { id: 'no', label: 'Not really', emoji: '🌱' },
+  ];
+  const achievedLabel = (a) => (ACHIEVED.find((x) => x.id === a) || {}).label;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* switch mark top left · greeting · settings cog top right */}
@@ -213,6 +272,60 @@ export default function HomeScreen({
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* --- Morning rundown / evening recap --- */}
+        {phase === 'morning' ? (
+          <TouchableOpacity style={styles.runBig} onPress={openMorning} activeOpacity={0.9}>
+            <Text style={styles.runEyebrow}>☀️  MORNING RUNDOWN</Text>
+            {rd.morningDone ? (
+              <View>
+                <Text style={styles.runTitle}>You're set for today.</Text>
+                {!!rd.intention && <Text style={styles.runIntention}>“{rd.intention}”</Text>}
+                <Text style={styles.runAction}>Review or edit ›</Text>
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.runTitle}>Plan your day, {name || 'friend'}.</Text>
+                <Text style={styles.runMeta}>
+                  {actionable.length} to-do{actionable.length === 1 ? '' : 's'} · {dayEvents.length} event{dayEvents.length === 1 ? '' : 's'} today
+                </Text>
+                <View style={styles.runBtn}><Text style={styles.runBtnText}>Start rundown</Text></View>
+              </View>
+            )}
+          </TouchableOpacity>
+        ) : phase === 'evening' ? (
+          <TouchableOpacity style={styles.runBig} onPress={openEvening} activeOpacity={0.9}>
+            <Text style={styles.runEyebrow}>🌙  EVENING RECAP</Text>
+            {rd.eveningDone ? (
+              <View>
+                <Text style={styles.runTitle}>Day wrapped.</Text>
+                {rd.achieved && <Text style={styles.runIntention}>Went how you hoped? {achievedLabel(rd.achieved)}.</Text>}
+                <Text style={styles.runAction}>Review or edit ›</Text>
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.runTitle}>How did today go?</Text>
+                <Text style={styles.runMeta}>
+                  {habits.filter((h) => h.lastDone !== today).length} habit{habits.filter((h) => h.lastDone !== today).length === 1 ? '' : 's'} · {actionable.length} to-do{actionable.length === 1 ? '' : 's'} still open
+                </Text>
+                <View style={styles.runBtn}><Text style={styles.runBtnText}>Start recap</Text></View>
+              </View>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.runStrip}
+            onPress={() => (collapsedKind === 'morning' ? openMorning() : openEvening())}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.runStripText}>
+              {collapsedKind === 'morning' ? '☀️  Morning rundown' : '🌙  Evening recap'}
+            </Text>
+            <Text style={styles.runStripRight}>
+              {(collapsedKind === 'morning' ? rd.morningDone : rd.eveningDone) ? '✓ done' : 'tap to open ›'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* --- What Organize noticed --- */}
         {notice && (
           <CompanionCard
@@ -384,8 +497,8 @@ export default function HomeScreen({
           <Text style={[styles.settingsLabel, { marginTop: 20 }]}>Extras</Text>
           <TouchableOpacity style={styles.prefRow} onPress={onToggleNotify} activeOpacity={0.75}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.prefTitle}>Morning digest</Text>
-              <Text style={styles.prefHint}>One notification at 8:00 on days with events.</Text>
+              <Text style={styles.prefTitle}>Rundown reminders</Text>
+              <Text style={styles.prefHint}>A nudge at 7am to plan your day and 7pm to recap it.</Text>
             </View>
             <View style={[styles.toggle, notifyOn && styles.toggleOn]}>
               <View style={[styles.knob, notifyOn && styles.knobOn]} />
@@ -403,12 +516,246 @@ export default function HomeScreen({
           </View>
         </View>
       </ModalShell>
+
+      {/* ================= Morning rundown (full screen) ================= */}
+      <Modal visible={flow === 'morning'} animationType="slide" onRequestClose={() => setFlow(null)}>
+        <FullPage>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.flowHead}>
+              <TouchableOpacity onPress={() => setFlow(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={styles.flowClose}>✕</Text>
+              </TouchableOpacity>
+              <Text style={styles.flowTitle}>Morning rundown</Text>
+              <TouchableOpacity onPress={saveMorning} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={styles.flowSave}>Done</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.flowWrap} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.flowGreeting}>{greetingLabel()}{name ? `, ${name}` : ''}.</Text>
+              <Text style={styles.flowDate}>{niceDate()}</Text>
+
+              <Text style={styles.flowSection}>How do you want today to go?</Text>
+              <TextInput
+                style={styles.flowInput}
+                placeholder="A calm, focused day…"
+                placeholderTextColor={COLORS.muted2}
+                value={intentionDraft}
+                onChangeText={setIntentionDraft}
+                multiline
+                textAlignVertical="top"
+              />
+
+              <Text style={styles.flowSection}>Today's to-dos</Text>
+              <Text style={styles.flowHint}>Tap the star to set up to 3 as your focus.</Text>
+              {focusTodos.length === 0 ? (
+                <Text style={styles.flowQuiet}>Nothing due today — a clear run.</Text>
+              ) : focusTodos.map((t) => (
+                <View key={t.id} style={styles.focusRow}>
+                  <TouchableOpacity onPress={() => toggleFocus(t.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons
+                      name={focusDraft.includes(t.id) ? 'star' : 'star-outline'}
+                      size={22}
+                      color={focusDraft.includes(t.id) ? COLORS.gold : COLORS.muted2}
+                    />
+                  </TouchableOpacity>
+                  <Text style={styles.focusText} numberOfLines={2}>{t.title}</Text>
+                </View>
+              ))}
+
+              <Text style={styles.flowSection}>On today</Text>
+              {dayEvents.length === 0 && dayReminders.length === 0 ? (
+                <Text style={styles.flowQuiet}>Nothing scheduled.</Text>
+              ) : (
+                <View>
+                  {dayEvents.map((e) => (
+                    <View key={e.id} style={styles.lineRow}>
+                      <View style={[styles.lineDot, { backgroundColor: eventDot(e) }]} />
+                      <Text style={styles.lineText} numberOfLines={1}>{e.title}</Text>
+                      <Text style={styles.lineMeta}>{e.time || 'all day'}</Text>
+                    </View>
+                  ))}
+                  {dayReminders.map((r) => (
+                    <View key={r.id} style={styles.lineRow}>
+                      <View style={[styles.lineDot, { backgroundColor: reminderDot(r) }]} />
+                      <Text style={styles.lineText} numberOfLines={1}>{r.title}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.flowBtn} onPress={saveMorning} activeOpacity={0.85}>
+                <Text style={styles.flowBtnText}>Start the day</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </FullPage>
+      </Modal>
+
+      {/* ================= Evening recap (full screen) ================= */}
+      <Modal visible={flow === 'evening'} animationType="slide" onRequestClose={() => setFlow(null)}>
+        <FullPage>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.flowHead}>
+              <TouchableOpacity onPress={() => setFlow(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={styles.flowClose}>✕</Text>
+              </TouchableOpacity>
+              <Text style={styles.flowTitle}>Evening recap</Text>
+              <TouchableOpacity onPress={saveEvening} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={styles.flowSave}>Done</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.flowWrap} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.flowGreeting}>How did today go?</Text>
+
+              <Text style={styles.flowSection}>Tick off your habits</Text>
+              {habits.length === 0 ? (
+                <Text style={styles.flowQuiet}>No habits yet.</Text>
+              ) : habits.map((h) => {
+                const done = h.lastDone === today;
+                return (
+                  <TouchableOpacity key={h.id} style={styles.tickRow} onPress={() => toggleHabit(h.id)} activeOpacity={0.7}>
+                    <View style={[styles.tickBox, done && styles.tickBoxOn]}>
+                      {done && <Text style={styles.tickMark}>✓</Text>}
+                    </View>
+                    <Text style={[styles.tickText, done && styles.tickTextDone]} numberOfLines={1}>{h.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+
+              <Text style={styles.flowSection}>Tick off your to-dos</Text>
+              {[...overdueTodos, ...dueTodos].length === 0 ? (
+                <Text style={styles.flowQuiet}>Nothing was due today.</Text>
+              ) : [...overdueTodos, ...dueTodos].map((t) => (
+                <TodoRow
+                  key={t.id}
+                  title={t.title}
+                  done={isTodoDone(t)}
+                  meta={focusDraft.includes(t.id) || (rd.focusIds || []).includes(t.id) ? '★ focus' : null}
+                  onToggle={() => toggleTodo(t.id)}
+                />
+              ))}
+
+              <Text style={styles.flowSection}>This morning you wanted:</Text>
+              <Text style={styles.flowIntentionBack}>
+                {rd.intention ? `“${rd.intention}”` : 'No intention set this morning.'}
+              </Text>
+
+              <Text style={styles.flowSection}>Did the day go how you hoped?</Text>
+              <View style={styles.achievedRow}>
+                {ACHIEVED.map((a) => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={[styles.achievedChip, achievedDraft === a.id && styles.achievedChipOn]}
+                    onPress={() => setAchievedDraft(a.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.achievedEmoji}>{a.emoji}</Text>
+                    <Text style={[styles.achievedLabel, achievedDraft === a.id && styles.achievedLabelOn]}>{a.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TextInput
+                style={[styles.flowInput, { marginTop: 14 }]}
+                placeholder="Anything you want to note about today… (optional)"
+                placeholderTextColor={COLORS.muted2}
+                value={reflectionDraft}
+                onChangeText={setReflectionDraft}
+                multiline
+                textAlignVertical="top"
+              />
+
+              <TouchableOpacity style={styles.flowBtn} onPress={saveEvening} activeOpacity={0.85}>
+                <Text style={styles.flowBtnText}>Wrap up the day</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </FullPage>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const makeStyles = (COLORS) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20 },
+
+  // --- rundown card (large) + collapsed strip ---
+  runBig: {
+    backgroundColor: COLORS.espresso, borderRadius: 18,
+    padding: 20, marginBottom: 14,
+  },
+  runEyebrow: { color: COLORS.crema, fontSize: 11.5, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10 },
+  runTitle: { color: COLORS.bg, fontSize: 22, fontWeight: '600', fontFamily: SERIF, lineHeight: 28 },
+  runMeta: { color: COLORS.crema, fontSize: 14, marginTop: 6 },
+  runIntention: { color: COLORS.crema, fontSize: 15, fontStyle: 'italic', fontFamily: SERIF, marginTop: 8, lineHeight: 22 },
+  runBtn: {
+    backgroundColor: COLORS.bg, borderRadius: 12, marginTop: 16,
+    paddingVertical: 12, alignItems: 'center',
+  },
+  runBtnText: { color: COLORS.espresso, fontSize: 15.5, fontWeight: '800' },
+  runAction: { color: COLORS.bg, fontSize: 13.5, fontWeight: '700', marginTop: 12, opacity: 0.85 },
+  runStrip: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16, marginBottom: 14,
+  },
+  runStripText: { color: COLORS.ink, fontSize: 14.5, fontWeight: '700' },
+  runStripRight: { color: COLORS.espressoLight, fontSize: 13, fontWeight: '700' },
+
+  // --- full-screen flow ---
+  flowHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: COLORS.line,
+  },
+  flowClose: { color: COLORS.muted, fontSize: 17, fontWeight: '600' },
+  flowTitle: { color: COLORS.ink, fontSize: 17, fontWeight: '600', fontFamily: SERIF },
+  flowSave: { color: COLORS.espresso, fontSize: 16, fontWeight: '700' },
+  flowWrap: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 36 },
+  flowGreeting: { color: COLORS.ink, fontSize: 25, fontWeight: '600', fontFamily: SERIF },
+  flowDate: { color: COLORS.muted, fontSize: 14.5, marginTop: 3 },
+  flowSection: { color: COLORS.ink, fontSize: 16.5, fontWeight: '700', fontFamily: SERIF, marginTop: 24, marginBottom: 6 },
+  flowHint: { color: COLORS.muted2, fontSize: 12.5, marginBottom: 8 },
+  flowQuiet: { color: COLORS.muted, fontSize: 14, marginTop: 2 },
+  flowInput: {
+    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 13,
+    color: COLORS.ink, fontSize: 16, lineHeight: 23, minHeight: 76, marginTop: 6,
+  },
+  focusRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 9,
+  },
+  focusText: { color: COLORS.ink, fontSize: 15.5, flex: 1 },
+  tickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
+  tickBox: {
+    width: 24, height: 24, borderRadius: 8, borderWidth: 2,
+    borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center',
+  },
+  tickBoxOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  tickMark: { color: COLORS.bg, fontSize: 14, fontWeight: '700' },
+  tickText: { color: COLORS.ink, fontSize: 15.5, flex: 1 },
+  tickTextDone: { color: COLORS.muted, textDecorationLine: 'line-through' },
+  flowIntentionBack: {
+    color: COLORS.espressoLight, fontSize: 15.5, fontStyle: 'italic',
+    fontFamily: SERIF, lineHeight: 23, marginTop: 2,
+  },
+  achievedRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  achievedChip: {
+    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 14,
+    borderWidth: 1, borderColor: COLORS.lineStrong, backgroundColor: COLORS.panel,
+  },
+  achievedChipOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  achievedEmoji: { fontSize: 20 },
+  achievedLabel: { color: COLORS.muted, fontSize: 13, fontWeight: '700', marginTop: 4 },
+  achievedLabelOn: { color: COLORS.bg },
+  flowBtn: {
+    backgroundColor: COLORS.espresso, borderRadius: 14,
+    paddingVertical: 15, alignItems: 'center', marginTop: 28,
+  },
+  flowBtnText: { color: COLORS.bg, fontSize: 16, fontWeight: '700' },
 
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
   switchWrap: { paddingTop: 16, marginRight: 12 },
