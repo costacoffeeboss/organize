@@ -12,10 +12,10 @@
 //  stays black-and-silver inside cream Life, and vice versa.
 // =====================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert,
-  PanResponder, StyleSheet,
+  FlatList, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +35,12 @@ import FAB from '../components/FAB';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
 const MINUTES = ['00', '15', '30', '45'];
+
+// Fixed geometry for the endless month scroll (Apple-Calendar style):
+// every month renders 6 week-rows tall so scroll positions are exact.
+const CAL_CELL_H = 84;
+const CAL_TITLE_H = 38;
+const CAL_MONTH_H = CAL_TITLE_H + 6 * CAL_CELL_H;
 
 export default function CalendarScreen({
   mode, todos, toggleTodo, events, deviceEvents, addEvent, deleteEvent, unshareEvent,
@@ -164,17 +170,37 @@ export default function CalendarScreen({
     setExpanded(false);
   }
 
-  // Swipe up/down on the big month grid to scroll through months,
-  // like a real calendar app. (Created per render so it always sees
-  // the current month — PanResponder closures go stale otherwise.)
-  const monthSwipe = PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) =>
-      Math.abs(g.dy) > 14 && Math.abs(g.dy) > Math.abs(g.dx) * 1.4,
-    onPanResponderRelease: (_, g) => {
-      if (g.dy <= -45) nextMonth();
-      else if (g.dy >= 45) prevMonth();
-    },
-  });
+  // --- The endless month scroll (Apple-Calendar style) ---
+  // Three years of months in one continuously scrolling list; the
+  // header title follows whichever month fills the screen.
+  const monthWindow = useMemo(() => {
+    const base = new Date();
+    const list = [];
+    for (let off = -12; off <= 24; off++) {
+      const d = new Date(base.getFullYear(), base.getMonth() + off, 1);
+      list.push({ year: d.getFullYear(), month: d.getMonth(), id: `${d.getFullYear()}-${d.getMonth()}` });
+    }
+    return list;
+  }, []);
+  const listRef = useRef(null);
+  const visIdx = useRef(12); // index of the visible month (12 = this month)
+  const viewCfg = useRef({ itemVisiblePercentThreshold: 55 }).current;
+  const onViewable = useRef(({ viewableItems }) => {
+    const first = viewableItems[0];
+    if (!first || first.index == null) return;
+    visIdx.current = first.index;
+    setYear(first.item.year);
+    setMonth(first.item.month);
+  }).current;
+
+  const monthIndexOf = (y, m) => {
+    const i = monthWindow.findIndex((x) => x.year === y && x.month === m);
+    return i === -1 ? 12 : i;
+  };
+  function expScroll(step) {
+    const i = Math.min(monthWindow.length - 1, Math.max(0, visIdx.current + step));
+    listRef.current?.scrollToIndex({ index: i, animated: true });
+  }
 
   // Dots for the visible month only (cheap: ~31 days each render).
   const dots = {};
@@ -539,7 +565,7 @@ export default function CalendarScreen({
             </TouchableOpacity>
             <View style={styles.expNav}>
               <TouchableOpacity
-                onPress={() => expMode === 'month' ? prevMonth() : setWeekAnchor(addDays(weekAnchor, -7))}
+                onPress={() => expMode === 'month' ? expScroll(-1) : setWeekAnchor(addDays(weekAnchor, -7))}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.navArrow}>‹</Text>
@@ -550,7 +576,7 @@ export default function CalendarScreen({
                   : `Week of ${shortDate(weekStartKey(weekAnchor))}`}
               </Text>
               <TouchableOpacity
-                onPress={() => expMode === 'month' ? nextMonth() : setWeekAnchor(addDays(weekAnchor, 7))}
+                onPress={() => expMode === 'month' ? expScroll(1) : setWeekAnchor(addDays(weekAnchor, 7))}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.navArrow}>›</Text>
@@ -572,70 +598,85 @@ export default function CalendarScreen({
           </View>
 
           {expMode === 'month' ? (
-            <View style={styles.bigGrid} {...monthSwipe.panHandlers}>
-              {/* weekday letters */}
+            <View style={styles.bigGrid}>
+              {/* weekday letters stay put; the months flow underneath */}
               <View style={styles.bigWeekHead}>
                 {WEEKDAY_LETTERS.map((w, i) => (
                   <Text key={i} style={styles.bigWeekday}>{w}</Text>
                 ))}
               </View>
-              {/* the month, one flex row per week — each day carries
-                  its ribbons underneath the number, calendar-app style */}
-              {(() => {
-                const cells = monthCells(year, month);
-                const weeks = [];
-                for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-                return weeks.map((week, wi) => (
-                  <View key={wi} style={styles.bigRow}>
-                    {week.map((cell, ci) => {
-                      if (!cell) return <View key={ci} style={styles.bigCell} />;
-                      const items = itemsOn(cell.key);
-                      const isToday = cell.key === today;
-                      return (
-                        <TouchableOpacity
-                          key={ci}
-                          style={[styles.bigCell, cell.key === selected && styles.bigCellSel]}
-                          onPress={() => pickDayAndClose(cell.key)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[styles.bigDayNum, isToday && styles.bigDayToday]}>
-                            {cell.day}
-                          </Text>
-                          {items.slice(0, 3).map((it) => {
-                            const away = !it.device && it.kind !== 'todo' && foreign(it.owner);
-                            const f = away ? foreignRibbon(it.owner) : null;
+              {/* one continuous scroll of months, like Apple's Calendar */}
+              <FlatList
+                ref={listRef}
+                data={monthWindow}
+                keyExtractor={(m) => m.id}
+                initialScrollIndex={monthIndexOf(year, month)}
+                getItemLayout={(_, index) => ({ length: CAL_MONTH_H, offset: CAL_MONTH_H * index, index })}
+                onViewableItemsChanged={onViewable}
+                viewabilityConfig={viewCfg}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => {
+                  const cells = monthCells(item.year, item.month);
+                  while (cells.length < 42) cells.push(null); // constant height
+                  const weeks = [];
+                  for (let i = 0; i < 42; i += 7) weeks.push(cells.slice(i, i + 7));
+                  return (
+                    <View style={{ height: CAL_MONTH_H }}>
+                      <Text style={styles.bigMonthTitle}>{monthLabel(item.year, item.month)}</Text>
+                      {weeks.map((week, wi) => (
+                        <View key={wi} style={styles.bigRow}>
+                          {week.map((cell, ci) => {
+                            if (!cell) return <View key={ci} style={styles.bigCell} />;
+                            const items = itemsOn(cell.key);
+                            const isToday = cell.key === today;
                             return (
-                              <View key={it.id} style={[
-                                styles.ribbon,
-                                it.kind === 'event' && styles.ribbonEvent,
-                                it.kind === 'reminder' && styles.ribbonReminder,
-                                it.kind === 'todo' && styles.ribbonTodo,
-                                away && f.box,
-                                it.device && styles.ribbonDevice,
-                              ]}>
-                                <Text
-                                  style={[
-                                    styles.ribbonText,
-                                    it.kind === 'todo' && styles.ribbonTextTodo,
-                                    away && f.text,
-                                    it.device && styles.ribbonTextDevice,
-                                  ]}
-                                  numberOfLines={1}
-                                >
-                                  {it.title}
+                              <TouchableOpacity
+                                key={ci}
+                                style={[styles.bigCell, cell.key === selected && styles.bigCellSel]}
+                                onPress={() => pickDayAndClose(cell.key)}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={[styles.bigDayNum, isToday && styles.bigDayToday]}>
+                                  {cell.day}
                                 </Text>
-                              </View>
+                                {items.slice(0, 3).map((it) => {
+                                  const away = !it.device && it.kind !== 'todo' && foreign(it.owner);
+                                  const f = away ? foreignRibbon(it.owner) : null;
+                                  return (
+                                    <View key={it.id} style={[
+                                      styles.ribbon,
+                                      it.kind === 'event' && styles.ribbonEvent,
+                                      it.kind === 'reminder' && styles.ribbonReminder,
+                                      it.kind === 'todo' && styles.ribbonTodo,
+                                      away && f.box,
+                                      it.device && styles.ribbonDevice,
+                                    ]}>
+                                      <Text
+                                        style={[
+                                          styles.ribbonText,
+                                          it.kind === 'todo' && styles.ribbonTextTodo,
+                                          away && f.text,
+                                          it.device && styles.ribbonTextDevice,
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {it.title}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                                {items.length > 3 && (
+                                  <Text style={styles.moreText}>+{items.length - 3}</Text>
+                                )}
+                              </TouchableOpacity>
                             );
                           })}
-                          {items.length > 3 && (
-                            <Text style={styles.moreText}>+{items.length - 3}</Text>
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                ));
-              })()}
+                        </View>
+                      ))}
+                    </View>
+                  );
+                }}
+              />
             </View>
           ) : (
             <ScrollView
@@ -750,7 +791,11 @@ const makeStyles = (COLORS) => {
     flex: 1, textAlign: 'center', color: COLORS.muted2,
     fontSize: 11, fontWeight: '600', letterSpacing: 1,
   },
-  bigRow: { flex: 1, flexDirection: 'row' },
+  bigMonthTitle: {
+    height: CAL_TITLE_H, color: COLORS.ink, fontSize: 17, fontWeight: '600',
+    fontFamily: SERIF, paddingLeft: 8, paddingTop: 12,
+  },
+  bigRow: { height: CAL_CELL_H, flexDirection: 'row' },
   bigCell: {
     flex: 1, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.lineStrong,
     paddingTop: 4, paddingHorizontal: 2, overflow: 'hidden',
