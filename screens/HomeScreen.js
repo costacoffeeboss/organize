@@ -182,6 +182,14 @@ export default function HomeScreen({
   const jStreak = currentStreak(new Set(Object.keys(journal)));
   const prompt = PROMPTS[new Date().getDate() % PROMPTS.length];
 
+  // If the companion is already nudging about journalling, a second
+  // journal prompt right underneath just looks naggy — hide the card
+  // until it has an actual entry to show.
+  const JOURNAL_KINDS = new Set([
+    'journal_gap', 'journal_streak', 'mood_dip', 'mood_up', 'recurring_topic',
+  ]);
+  const hideJournalCard = !!notice && JOURNAL_KINDS.has(notice.kind) && !todayEntry;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* switch mark top left · greeting · settings cog top right */}
@@ -297,6 +305,7 @@ export default function HomeScreen({
         </Rise>
 
         {/* --- Journal nudge / today's entry --- */}
+        {!hideJournalCard && (
         <Rise delay={220}>
           <TouchableOpacity
             style={styles.journalCard}
@@ -317,6 +326,7 @@ export default function HomeScreen({
             </Text>
           </TouchableOpacity>
         </Rise>
+        )}
       </ScrollView>
 
       {/* ================= Switch sides ================= */}

@@ -144,7 +144,26 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, updateHabi
   const [newTarget, setNewTarget] = useState(7); // times per week
   const [openId, setOpenId] = useState(null); // which habit's analytics are open
   const [editId, setEditId] = useState(null); // which habit's edit sheet is open
+  const [completedOpen, setCompletedOpen] = useState(false);
+  // A just-ticked habit lingers in the main list long enough for its
+  // pop / week-complete celebration to play before tidying away.
+  const [lingering, setLingering] = useState({});
   const today = todayKey();
+
+  function handleToggle(h) {
+    const wasDone = h.lastDone === today;
+    toggleHabit(h.id);
+    if (!wasDone) {
+      setLingering((p) => ({ ...p, [h.id]: true }));
+      setTimeout(() => {
+        setLingering((p) => {
+          const next = { ...p };
+          delete next[h.id];
+          return next;
+        });
+      }, 2600);
+    }
+  }
 
   const doneCount = habits.filter((h) => h.lastDone === today).length;
   const total = habits.length;
@@ -174,6 +193,10 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, updateHabi
 
   const edit = habits.find((h) => h.id === editId);
   const editDays = edit ? new Set(edit.history || []) : new Set();
+
+  // Done-today habits tuck into the Completed drop-down.
+  const remaining = habits.filter((h) => h.lastDone !== today || lingering[h.id]);
+  const completed = habits.filter((h) => h.lastDone === today && !lingering[h.id]);
 
   const open = habits.find((h) => h.id === openId);
   const openDays = open ? new Set(open.history || []) : new Set();
@@ -212,16 +235,49 @@ export default function HabitsScreen({ habits, addHabit, toggleHabit, updateHabi
         ) : (
           <Text style={styles.hint}>Tick the box · tap a habit for its story · hold to edit.</Text>
         )}
-        {habits.map((h) => (
+        {remaining.map((h) => (
           <HabitRow
             key={h.id}
             habit={h}
             today={today}
-            onToggle={() => toggleHabit(h.id)}
+            onToggle={() => handleToggle(h)}
             onOpen={() => setOpenId(h.id)}
             onLongPress={() => setEditId(h.id)}
           />
         ))}
+        {remaining.length === 0 && habits.length > 0 && (
+          <Text style={styles.allDone}>All done for today. Quietly excellent.</Text>
+        )}
+
+        {/* --- Completed today, tucked away (like Upcoming on To-dos) --- */}
+        {completed.length > 0 && (
+          <View>
+            <TouchableOpacity
+              style={[styles.groupHead, completedOpen && styles.groupHeadOpen]}
+              onPress={() => setCompletedOpen(!completedOpen)}
+              activeOpacity={0.75}
+              hitSlop={{ top: 4, bottom: 4 }}
+            >
+              <Text style={styles.groupTitle}>Completed</Text>
+              <View style={styles.groupRight}>
+                <View style={styles.groupCountPill}>
+                  <Text style={styles.groupCount}>{completed.length}</Text>
+                </View>
+                <Text style={styles.chevron}>{completedOpen ? '▾' : '▸'}</Text>
+              </View>
+            </TouchableOpacity>
+            {completedOpen && completed.map((h) => (
+              <HabitRow
+                key={h.id}
+                habit={h}
+                today={today}
+                onToggle={() => handleToggle(h)}
+                onOpen={() => setOpenId(h.id)}
+                onLongPress={() => setEditId(h.id)}
+              />
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <FAB onPress={() => { setNewHabit(''); setNewTarget(7); setShowAdd(true); }} />
@@ -381,6 +437,22 @@ const makeStyles = (COLORS) => StyleSheet.create({
   ringDone: { color: COLORS.espresso, fontSize: 13, fontWeight: '700', marginTop: 6 },
 
   hint: { color: COLORS.muted2, fontSize: 12.5, marginBottom: 10 },
+  allDone: { color: COLORS.muted, fontSize: 13.5, marginBottom: 12 },
+  groupHead: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16,
+    marginTop: 8, marginBottom: 10,
+  },
+  groupHeadOpen: { borderColor: COLORS.lineStrong },
+  groupTitle: { color: COLORS.ink, fontSize: 16, fontWeight: '700' },
+  groupRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupCountPill: {
+    backgroundColor: COLORS.mode === 'work' ? 'rgba(201,205,214,0.12)' : 'rgba(75,54,38,0.12)',
+    borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3,
+  },
+  groupCount: { color: COLORS.espressoLight, fontSize: 13, fontWeight: '700' },
+  chevron: { color: COLORS.espressoLight, fontSize: 17, fontWeight: '600' },
   empty: { color: COLORS.muted, fontSize: 14.5, lineHeight: 21, textAlign: 'center', marginTop: 30 },
 
   row: {
