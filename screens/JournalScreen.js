@@ -56,8 +56,6 @@ const PROMPTS = [
   'What did today teach you?',
 ];
 
-const STEP_PROMPT = 'One step at a time — what step did you take today?';
-
 // The guided-journal format, editable in the tab's settings cog. The
 // titles are laid onto the page as headings — one open page, so the
 // finished entry reads as a single piece.
@@ -69,15 +67,24 @@ export const DEFAULT_GUIDED_SECTIONS = [
   { id: 'free', title: 'Free thoughts' },
 ];
 
+// Evening "did it go how you hoped?" ratings (shared with Home).
+const ACHIEVED = [
+  { id: 'yes', label: 'Yes', emoji: '🎯' },
+  { id: 'partly', label: 'Partly', emoji: '🌤️' },
+  { id: 'no', label: 'Not really', emoji: '🌱' },
+];
+const hasRecap = (r) =>
+  !!r && (r.intention || r.reflection || r.achieved || r.morningDone || r.eveningDone);
+
 export default function JournalScreen({
-  journal, saveEntry, deleteEntry,
-  steps, saveStep, deleteStep, goals,
+  journal, saveEntry, deleteEntry, goals,
   journalSeed, onSeedConsumed,
   guidedOn, onToggleGuided, guidedSections, onSetGuidedSections,
+  rundown, onSaveRecap,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
-  const [part, setPart] = useState('today'); // 'today' | 'goals'
+  const [part, setPart] = useState('journal'); // 'journal' | 'recaps'
   const [editingKey, setEditingKey] = useState(null); // day being written/read
   const [draft, setDraft] = useState('');
   const [draftMoods, setDraftMoods] = useState([]); // multi-select
@@ -90,8 +97,12 @@ export default function JournalScreen({
   const [stepText, setStepText] = useState('');
   const [blocks, setBlocks] = useState([]);     // answered {title, text}, in order
   const [pageBaseline, setPageBaseline] = useState('');
-  const [stepKey, setStepKey] = useState(null); // day whose step is open
-  const [stepDraft, setStepDraft] = useState('');
+
+  // --- Recaps (morning/evening notes, saved here, editable) ---
+  const [recapKey, setRecapKey] = useState(null);
+  const [recapIntention, setRecapIntention] = useState('');
+  const [recapAchieved, setRecapAchieved] = useState(null);
+  const [recapReflection, setRecapReflection] = useState('');
 
   // --- Guided journaling ---
   const [showPrefs, setShowPrefs] = useState(false);
@@ -158,35 +169,37 @@ export default function JournalScreen({
   const todayEntry = journal[today];
   const prompt = PROMPTS[new Date().getDate() % PROMPTS.length];
 
-  const stepDays = new Set(Object.keys(steps || {}));
-  const todayStep = (steps || {})[today];
   const activeGoals = (goals || []).filter((g) => !g.achievedOn);
 
-  function openStep(key) {
+  // --- Recaps ---
+  const recaps = rundown || {};
+  const recapDays = new Set(Object.keys(recaps).filter((k) => hasRecap(recaps[k])));
+  const todayRecap = recaps[today];
+
+  function openRecap(key) {
     if (key > today) return;
-    const existing = (steps || {})[key];
-    setStepDraft(existing ? existing.text : '');
-    setStepKey(key);
+    const r = recaps[key] || {};
+    setRecapIntention(r.intention || '');
+    setRecapAchieved(r.achieved || null);
+    setRecapReflection(r.reflection || '');
+    setRecapKey(key);
   }
-
-  function onSaveStep() {
-    const text = stepDraft.trim();
-    if (text) saveStep(stepKey, text);
-    setStepKey(null);
+  function onSaveRecapNotes() {
+    onSaveRecap(recapKey, {
+      intention: recapIntention.trim(),
+      achieved: recapAchieved,
+      reflection: recapReflection.trim(),
+    });
+    setRecapKey(null);
   }
-
-  function onDeleteStep() {
-    Alert.alert('Delete this entry?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { deleteStep(stepKey); setStepKey(null); } },
-    ]);
-  }
+  const recapCanSave =
+    !!recapIntention.trim() || !!recapReflection.trim() || !!recapAchieved;
 
   // Home's companion card can send us here with its question in hand —
   // open today's page with that question as the prompt.
   useEffect(() => {
     if (journalSeed) {
-      setPart('today');
+      setPart('journal');
       openDay(today, journalSeed);
       onSeedConsumed();
     }
@@ -277,11 +290,18 @@ export default function JournalScreen({
 
   const moodsOf = (key) => moodIdsOf(journal[key]).map(moodById).filter(Boolean);
 
-  // Dot on every day that has an entry (espresso) / a step (gold).
+  // Dot on every day with a journal entry (espresso) / a recap (gold).
   const dots = {};
   entryDays.forEach((k) => { dots[k] = [COLORS.espressoLight]; });
-  const stepDots = {};
-  stepDays.forEach((k) => { stepDots[k] = [COLORS.gold]; });
+  const recapDots = {};
+  recapDays.forEach((k) => { recapDots[k] = [COLORS.gold]; });
+
+  const recapSummary = (r) => {
+    if (!r) return '';
+    if (r.reflection) return r.reflection;
+    if (r.intention) return r.intention;
+    return r.achieved ? `Went how you hoped? ${(ACHIEVED.find((a) => a.id === r.achieved) || {}).label}.` : '';
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -301,9 +321,9 @@ export default function JournalScreen({
         </TouchableOpacity>
       </View>
 
-      {/* Today's reflections | steps toward your goals */}
+      {/* Journal | day recaps */}
       <View style={styles.segment}>
-        {[['today', 'Today'], ['goals', 'Goals']].map(([id, label]) => (
+        {[['journal', 'Journal'], ['recaps', 'Recaps']].map(([id, label]) => (
           <TouchableOpacity
             key={id}
             style={[styles.segmentBtn, part === id && styles.segmentOn]}
@@ -316,7 +336,7 @@ export default function JournalScreen({
         ))}
       </View>
 
-      {part === 'today' ? (
+      {part === 'journal' ? (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
           {/* Today's card: the entry if written, otherwise a gentle prompt */}
           <TouchableOpacity style={styles.todayCard} onPress={() => openDay(today)} activeOpacity={0.85}>
@@ -334,6 +354,16 @@ export default function JournalScreen({
             ) : (
               <Text style={styles.promptText}>{prompt}</Text>
             )}
+            {/* goal reminder, folded in from the old Goals side */}
+            {activeGoals.length > 0 && (
+              <View style={styles.goalChips}>
+                {activeGoals.slice(0, 3).map((g) => (
+                  <View key={g.id} style={styles.goalChip}>
+                    <Text style={styles.goalChipText} numberOfLines={1}>⚑ {g.title}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
             <Text style={styles.todayAction}>
               {todayEntry ? 'Read or edit ›' : 'Write it down ›'}
             </Text>
@@ -346,38 +376,35 @@ export default function JournalScreen({
         </ScrollView>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
-          {/* Today's step toward the goals */}
-          <TouchableOpacity style={styles.stepCard} onPress={() => openStep(today)} activeOpacity={0.85}>
+          {/* Today's recap card */}
+          <TouchableOpacity style={styles.stepCard} onPress={() => openRecap(today)} activeOpacity={0.85}>
             <View style={styles.todayHead}>
-              <Text style={styles.todayTitle}>Today's step</Text>
+              <Text style={styles.todayTitle}>Today's recap</Text>
+              {todayRecap && todayRecap.achieved && (
+                <Text style={styles.moodTag}>
+                  {(ACHIEVED.find((a) => a.id === todayRecap.achieved) || {}).emoji}{' '}
+                  {(ACHIEVED.find((a) => a.id === todayRecap.achieved) || {}).label}
+                </Text>
+              )}
             </View>
-            {todayStep ? (
-              <Text style={styles.todayText} numberOfLines={4}>{todayStep.text}</Text>
+            {hasRecap(todayRecap) ? (
+              <Text style={styles.todayText} numberOfLines={4}>{recapSummary(todayRecap)}</Text>
             ) : (
-              <Text style={styles.promptText}>{STEP_PROMPT}</Text>
-            )}
-            {activeGoals.length > 0 && (
-              <View style={styles.goalChips}>
-                {activeGoals.slice(0, 3).map((g) => (
-                  <View key={g.id} style={styles.goalChip}>
-                    <Text style={styles.goalChipText} numberOfLines={1}>⚑ {g.title}</Text>
-                  </View>
-                ))}
-              </View>
+              <Text style={styles.promptText}>Your morning intention and evening reflection are saved here.</Text>
             )}
             <Text style={styles.todayAction}>
-              {todayStep ? 'Read or edit ›' : 'Note your step ›'}
+              {hasRecap(todayRecap) ? 'Read or edit ›' : 'Add a recap ›'}
             </Text>
           </TouchableOpacity>
 
-          {/* The month of steps */}
+          {/* The month of recaps */}
           <View style={styles.card}>
-            <CalendarPager dots={stepDots} maxKey={today} onSelect={openStep} />
+            <CalendarPager dots={recapDots} maxKey={today} onSelect={openRecap} />
           </View>
         </ScrollView>
       )}
 
-      <FAB onPress={() => (part === 'today' ? openDay(today) : openStep(today))} />
+      <FAB onPress={() => (part === 'journal' ? openDay(today) : openRecap(today))} />
 
       {/* ============ Journal settings (the cog) ============ */}
       <ModalShell
@@ -597,11 +624,11 @@ export default function JournalScreen({
         </FullPage>
       </Modal>
 
-      {/* ============ Full-page step composer (goals side) ============ */}
+      {/* ============ Recap notes editor ============ */}
       <Modal
-        visible={!!stepKey}
+        visible={!!recapKey}
         animationType="slide"
-        onRequestClose={() => setStepKey(null)}
+        onRequestClose={() => setRecapKey(null)}
       >
         <FullPage>
           <KeyboardAvoidingView
@@ -610,51 +637,61 @@ export default function JournalScreen({
           >
             <View style={styles.pageHead}>
               <TouchableOpacity
-                onPress={() => setStepKey(null)}
+                onPress={() => setRecapKey(null)}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
                 <Text style={styles.pageClose}>✕</Text>
               </TouchableOpacity>
               <Text style={styles.pageDate}>
-                {stepKey === today ? "Today's step" : stepKey ? niceDate(stepKey) : ''}
+                {recapKey === today ? 'Today' : recapKey ? niceDate(recapKey) : ''}
               </Text>
               <TouchableOpacity
-                onPress={onSaveStep}
-                disabled={!stepDraft.trim()}
+                onPress={onSaveRecapNotes}
+                disabled={!recapCanSave}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
-                <Text style={[styles.pageSave, !stepDraft.trim() && { opacity: 0.35 }]}>Save</Text>
+                <Text style={[styles.pageSave, !recapCanSave && { opacity: 0.35 }]}>Save</Text>
               </TouchableOpacity>
             </View>
 
-            {/* the goals you're stepping toward, for reference */}
-            {activeGoals.length > 0 && (
-              <View style={[styles.goalChips, { paddingHorizontal: 20, paddingTop: 12 }]}>
-                {activeGoals.slice(0, 3).map((g) => (
-                  <View key={g.id} style={styles.goalChip}>
-                    <Text style={styles.goalChipText} numberOfLines={1}>⚑ {g.title}</Text>
-                  </View>
+            <ScrollView contentContainerStyle={styles.recapWrap} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.recapLabel}>Morning — how you wanted the day to go</Text>
+              <TextInput
+                style={styles.recapInput}
+                placeholder="A calm, focused day…"
+                placeholderTextColor={COLORS.muted2}
+                value={recapIntention}
+                onChangeText={setRecapIntention}
+                multiline
+                textAlignVertical="top"
+              />
+
+              <Text style={styles.recapLabel}>Did it go how you hoped?</Text>
+              <View style={styles.achievedRow}>
+                {ACHIEVED.map((a) => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={[styles.achievedChip, recapAchieved === a.id && styles.achievedChipOn]}
+                    onPress={() => setRecapAchieved(recapAchieved === a.id ? null : a.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.achievedEmoji}>{a.emoji}</Text>
+                    <Text style={[styles.achievedLabel, recapAchieved === a.id && styles.achievedLabelOn]}>{a.label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
-            )}
 
-            <TextInput
-              style={styles.page}
-              placeholder={STEP_PROMPT}
-              placeholderTextColor={COLORS.muted2}
-              value={stepDraft}
-              onChangeText={setStepDraft}
-              multiline
-              textAlignVertical="top"
-              autoFocus
-              scrollEnabled
-            />
-
-            {(steps || {})[stepKey] && (
-              <TouchableOpacity onPress={onDeleteStep} style={styles.deleteRow}>
-                <Text style={styles.deleteBtn}>Delete entry</Text>
-              </TouchableOpacity>
-            )}
+              <Text style={styles.recapLabel}>Evening reflection</Text>
+              <TextInput
+                style={[styles.recapInput, { minHeight: 150 }]}
+                placeholder="How did today actually go?"
+                placeholderTextColor={COLORS.muted2}
+                value={recapReflection}
+                onChangeText={setRecapReflection}
+                multiline
+                textAlignVertical="top"
+              />
+            </ScrollView>
           </KeyboardAvoidingView>
         </FullPage>
       </Modal>
@@ -819,4 +856,22 @@ const makeStyles = (COLORS) => StyleSheet.create({
 
   deleteRow: { alignItems: 'center', paddingVertical: 12 },
   deleteBtn: { color: COLORS.danger, fontSize: 14.5, fontWeight: '600' },
+
+  // --- recap notes editor ---
+  recapWrap: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 36 },
+  recapLabel: { color: COLORS.ink, fontSize: 15.5, fontWeight: '700', fontFamily: SERIF, marginTop: 20, marginBottom: 8 },
+  recapInput: {
+    backgroundColor: COLORS.panel, borderWidth: 1, borderColor: COLORS.line,
+    borderRadius: 14, paddingHorizontal: 15, paddingVertical: 13,
+    color: COLORS.ink, fontSize: 16, lineHeight: 23, minHeight: 84,
+  },
+  achievedRow: { flexDirection: 'row', gap: 8 },
+  achievedChip: {
+    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 14,
+    borderWidth: 1, borderColor: COLORS.lineStrong, backgroundColor: COLORS.panel,
+  },
+  achievedChipOn: { backgroundColor: COLORS.espresso, borderColor: COLORS.espresso },
+  achievedEmoji: { fontSize: 20 },
+  achievedLabel: { color: COLORS.muted, fontSize: 13, fontWeight: '700', marginTop: 4 },
+  achievedLabelOn: { color: COLORS.bg },
 });

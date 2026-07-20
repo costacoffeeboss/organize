@@ -119,6 +119,27 @@ function migrateSharedEntry(e) {
   return e.owner ? e : { ...e, owner: 'life', shared: true };
 }
 
+// The Journal's "goals side" (one step a day) is folded into the daily
+// entry now. Any old step text is appended under a heading so nothing
+// is lost, then the steps store is emptied.
+function mergeStepsIntoJournal(journalMap, stepsMap) {
+  const out = { ...journalMap };
+  Object.entries(stepsMap || {}).forEach(([key, step]) => {
+    const stepText = (step && step.text ? step.text : '').trim();
+    if (!stepText) return;
+    const addition = `Toward your goals\n${stepText}`;
+    const existing = out[key];
+    if (existing) {
+      if (!(existing.text || '').includes(stepText)) {
+        out[key] = { ...existing, text: `${existing.text}\n\n${addition}` };
+      }
+    } else {
+      out[key] = { text: addition, mood: null, moods: null };
+    }
+  });
+  return out;
+}
+
 // The flame means: consecutive days for daily habits, consecutive
 // weeks the target was hit for "n×/week" habits.
 function habitStreak(daySet, target) {
@@ -191,9 +212,12 @@ export default function App() {
 
         setEvents((val(3) || []).map(migrateSharedEntry));
         setReminders((val(4) || []).map(migrateSharedEntry));
-        setJournal({ life: val(5) || {}, work: val(13) || {} });
+        setJournal({
+          life: mergeStepsIntoJournal(val(5) || {}, val(7) || {}),
+          work: mergeStepsIntoJournal(val(13) || {}, val(15) || {}),
+        });
         setGoals({ life: val(6) || [], work: val(14) || [] });
-        setSteps({ life: val(7) || {}, work: val(15) || {} });
+        setSteps({ life: {}, work: {} }); // steps folded into the journal above
         // Welcome flag, name and mode are plain strings, not JSON.
         setWelcomed(pairs[8][1] === '1');
         setName(pairs[9][1] || '');
@@ -547,6 +571,10 @@ export default function App() {
       [key]: { ...(map[key] || {}), achieved: achieved || null, reflection: reflection || '', eveningDone: true },
     }));
   }
+  // Edit a saved recap's notes from the Journal tab (no done flags).
+  function updateRecap(key, fields) {
+    setRundowns((map) => ({ ...map, [key]: { ...(map[key] || {}), ...fields } }));
+  }
 
   // Guided-journal preferences (shared across Life and Work).
   function toggleGuided() {
@@ -842,9 +870,6 @@ export default function App() {
                   journal={journal[mode]}
                   saveEntry={saveEntry}
                   deleteEntry={deleteEntry}
-                  steps={steps[mode]}
-                  saveStep={saveStep}
-                  deleteStep={deleteStep}
                   goals={goals[mode]}
                   journalSeed={journalSeed}
                   onSeedConsumed={() => setJournalSeed(null)}
@@ -852,6 +877,8 @@ export default function App() {
                   onToggleGuided={toggleGuided}
                   guidedSections={guidedSections}
                   onSetGuidedSections={updateGuidedSections}
+                  rundown={rundowns}
+                  onSaveRecap={updateRecap}
                 />
               )}
             </Tab.Screen>
