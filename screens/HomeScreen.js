@@ -201,12 +201,17 @@ export default function HomeScreen({
   ]);
   const hideJournalCard = !!notice && JOURNAL_KINDS.has(notice.kind) && !todayEntry;
 
-  // --- Rundown windows: large 6–10am / 6–10pm, collapsed otherwise ---
+  // --- Rundown timing ---
+  // The morning rundown owns the day until 5pm (or until you complete
+  // it); the evening recap takes over at 5pm. Whichever is "current"
+  // shows large while it's still open, and collapses to a strip once
+  // done (or before its day-part gets going).
   const hour = new Date().getHours();
-  const phase = hour >= 6 && hour < 10 ? 'morning'
-    : hour >= 18 && hour < 22 ? 'evening' : 'off';
-  const collapsedKind = hour >= 12 && hour < 22 ? 'evening' : 'morning';
   const rd = (rundown || {})[today] || {};
+  const current = hour >= 17 ? 'evening' : 'morning';
+  const bigNow = current === 'morning'
+    ? (hour >= 6 && !rd.morningDone)
+    : !rd.eveningDone;
 
   // The rundown spans your WHOLE day — Life + Work together — so it
   // builds its own cross-side picture (the other Home cards stay
@@ -291,7 +296,7 @@ export default function HomeScreen({
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         {/* --- Morning rundown / evening recap --- */}
-        {phase === 'morning' ? (
+        {bigNow && current === 'morning' ? (
           <TouchableOpacity style={styles.runBig} onPress={openMorning} activeOpacity={0.9}>
             <Text style={styles.runEyebrow}>☀️  MORNING RUNDOWN</Text>
             {rd.morningDone ? (
@@ -310,7 +315,7 @@ export default function HomeScreen({
               </View>
             )}
           </TouchableOpacity>
-        ) : phase === 'evening' ? (
+        ) : bigNow && current === 'evening' ? (
           <TouchableOpacity style={styles.runBig} onPress={openEvening} activeOpacity={0.9}>
             <Text style={styles.runEyebrow}>🌙  EVENING RECAP</Text>
             {rd.eveningDone ? (
@@ -332,14 +337,14 @@ export default function HomeScreen({
         ) : (
           <TouchableOpacity
             style={styles.runStrip}
-            onPress={() => (collapsedKind === 'morning' ? openMorning() : openEvening())}
+            onPress={() => (current === 'morning' ? openMorning() : openEvening())}
             activeOpacity={0.8}
           >
             <Text style={styles.runStripText}>
-              {collapsedKind === 'morning' ? '☀️  Morning rundown' : '🌙  Evening recap'}
+              {current === 'morning' ? '☀️  Morning rundown' : '🌙  Evening recap'}
             </Text>
             <Text style={styles.runStripRight}>
-              {(collapsedKind === 'morning' ? rd.morningDone : rd.eveningDone) ? '✓ done' : 'tap to open ›'}
+              {(current === 'morning' ? rd.morningDone : rd.eveningDone) ? '✓ done' : 'tap to open ›'}
             </Text>
           </TouchableOpacity>
         )}
