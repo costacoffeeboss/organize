@@ -78,9 +78,10 @@ function SwitchMark({ target, onPress }) {
 
 export default function HomeScreen({
   name, mode, habits, todos, events, deviceEvents, reminders, journal, toggleTodo,
-  toggleHabit, onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
+  onSeedJournal, onUpdateName, onResetAll, onSwitchMode,
   notifyOn, onToggleNotify,
   rundown, onSaveMorning, onSaveEvening, launchFlow, onFlowConsumed,
+  allHabits, allTodos, allEvents, allReminders, toggleHabitById, toggleTodoById,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const navigation = useNavigation();
@@ -207,9 +208,26 @@ export default function HomeScreen({
   const collapsedKind = hour >= 12 && hour < 22 ? 'evening' : 'morning';
   const rd = (rundown || {})[today] || {};
 
-  // To-dos you can act on today (overdue + due, not yet done).
-  const actionable = [...overdueTodos, ...dueTodos.filter((t) => !isTodoDone(t))];
-  const focusTodos = actionable; // starred in the morning
+  // The rundown spans your WHOLE day — Life + Work together — so it
+  // builds its own cross-side picture (the other Home cards stay
+  // per-side).
+  const rdDayEvents = [
+    ...(allEvents || []).filter((e) => eventOccursOn(e, today)),
+    ...deviceEvents.filter((e) => eventOccursOn(e, today)),
+  ].sort((a, b) => ((a.time || '') < (b.time || '') ? -1 : 1));
+  const rdDayReminders = (allReminders || []).filter((r) => reminderOccursOn(r, today));
+  const rdOverdue = (allTodos || []).filter((t) => !t.repeat && !t.done && t.deadline && t.deadline < today);
+  const rdDue = (allTodos || []).filter((t) =>
+    t.repeat
+      ? (t.completedOn === today ||
+         (t.repeat.type === 'rolling' ? t.nextDue <= today : repeatOccursOn(t.repeat, today)))
+      : t.deadline === today
+  );
+  const rdActionable = [...rdOverdue, ...rdDue.filter((t) => !isTodoDone(t))];
+  const rdEveningTodos = [...rdOverdue, ...rdDue];
+  const rdOpenHabits = (allHabits || []).filter((h) => h.lastDone !== today).length;
+  const focusTodos = rdActionable; // starred in the morning
+  const sideTag = (s) => (s && s !== mode ? (s === 'work' ? 'Work' : 'Life') : null);
 
   function openMorning() {
     setIntentionDraft(rd.intention || '');
@@ -286,7 +304,7 @@ export default function HomeScreen({
               <View>
                 <Text style={styles.runTitle}>Plan your day, {name || 'friend'}.</Text>
                 <Text style={styles.runMeta}>
-                  {actionable.length} to-do{actionable.length === 1 ? '' : 's'} · {dayEvents.length} event{dayEvents.length === 1 ? '' : 's'} today
+                  {rdActionable.length} to-do{rdActionable.length === 1 ? '' : 's'} · {rdDayEvents.length} event{rdDayEvents.length === 1 ? '' : 's'} today
                 </Text>
                 <View style={styles.runBtn}><Text style={styles.runBtnText}>Start rundown</Text></View>
               </View>
@@ -305,7 +323,7 @@ export default function HomeScreen({
               <View>
                 <Text style={styles.runTitle}>How did today go?</Text>
                 <Text style={styles.runMeta}>
-                  {habits.filter((h) => h.lastDone !== today).length} habit{habits.filter((h) => h.lastDone !== today).length === 1 ? '' : 's'} · {actionable.length} to-do{actionable.length === 1 ? '' : 's'} still open
+                  {rdOpenHabits} habit{rdOpenHabits === 1 ? '' : 's'} · {rdActionable.length} to-do{rdActionable.length === 1 ? '' : 's'} still open
                 </Text>
                 <View style={styles.runBtn}><Text style={styles.runBtnText}>Start recap</Text></View>
               </View>
@@ -560,22 +578,23 @@ export default function HomeScreen({
                     />
                   </TouchableOpacity>
                   <Text style={styles.focusText} numberOfLines={2}>{t.title}</Text>
+                  {sideTag(t.side) && <Text style={styles.sideTag}>{sideTag(t.side)}</Text>}
                 </View>
               ))}
 
               <Text style={styles.flowSection}>On today</Text>
-              {dayEvents.length === 0 && dayReminders.length === 0 ? (
+              {rdDayEvents.length === 0 && rdDayReminders.length === 0 ? (
                 <Text style={styles.flowQuiet}>Nothing scheduled.</Text>
               ) : (
                 <View>
-                  {dayEvents.map((e) => (
+                  {rdDayEvents.map((e) => (
                     <View key={e.id} style={styles.lineRow}>
                       <View style={[styles.lineDot, { backgroundColor: eventDot(e) }]} />
                       <Text style={styles.lineText} numberOfLines={1}>{e.title}</Text>
                       <Text style={styles.lineMeta}>{e.time || 'all day'}</Text>
                     </View>
                   ))}
-                  {dayReminders.map((r) => (
+                  {rdDayReminders.map((r) => (
                     <View key={r.id} style={styles.lineRow}>
                       <View style={[styles.lineDot, { backgroundColor: reminderDot(r) }]} />
                       <Text style={styles.lineText} numberOfLines={1}>{r.title}</Text>
@@ -610,30 +629,34 @@ export default function HomeScreen({
               <Text style={styles.flowGreeting}>How did today go?</Text>
 
               <Text style={styles.flowSection}>Tick off your habits</Text>
-              {habits.length === 0 ? (
+              {(allHabits || []).length === 0 ? (
                 <Text style={styles.flowQuiet}>No habits yet.</Text>
-              ) : habits.map((h) => {
+              ) : (allHabits || []).map((h) => {
                 const done = h.lastDone === today;
                 return (
-                  <TouchableOpacity key={h.id} style={styles.tickRow} onPress={() => toggleHabit(h.id)} activeOpacity={0.7}>
+                  <TouchableOpacity key={h.id} style={styles.tickRow} onPress={() => toggleHabitById(h.id)} activeOpacity={0.7}>
                     <View style={[styles.tickBox, done && styles.tickBoxOn]}>
                       {done && <Text style={styles.tickMark}>✓</Text>}
                     </View>
                     <Text style={[styles.tickText, done && styles.tickTextDone]} numberOfLines={1}>{h.name}</Text>
+                    {sideTag(h.side) && <Text style={styles.sideTag}>{sideTag(h.side)}</Text>}
                   </TouchableOpacity>
                 );
               })}
 
               <Text style={styles.flowSection}>Tick off your to-dos</Text>
-              {[...overdueTodos, ...dueTodos].length === 0 ? (
+              {rdEveningTodos.length === 0 ? (
                 <Text style={styles.flowQuiet}>Nothing was due today.</Text>
-              ) : [...overdueTodos, ...dueTodos].map((t) => (
+              ) : rdEveningTodos.map((t) => (
                 <TodoRow
                   key={t.id}
                   title={t.title}
                   done={isTodoDone(t)}
-                  meta={focusDraft.includes(t.id) || (rd.focusIds || []).includes(t.id) ? '★ focus' : null}
-                  onToggle={() => toggleTodo(t.id)}
+                  meta={
+                    (focusDraft.includes(t.id) || (rd.focusIds || []).includes(t.id)) ? '★ focus'
+                      : sideTag(t.side)
+                  }
+                  onToggle={() => toggleTodoById(t.id)}
                 />
               ))}
 
@@ -729,6 +752,10 @@ const makeStyles = (COLORS) => StyleSheet.create({
     paddingVertical: 9,
   },
   focusText: { color: COLORS.ink, fontSize: 15.5, flex: 1 },
+  sideTag: {
+    color: COLORS.muted2, fontSize: 11, fontWeight: '700',
+    fontStyle: 'italic', fontFamily: SERIF, marginLeft: 8,
+  },
   tickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   tickBox: {
     width: 24, height: 24, borderRadius: 8, borderWidth: 2,

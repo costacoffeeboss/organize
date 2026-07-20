@@ -63,8 +63,7 @@ const DEVICE_CAL_KEY = '@organize_device_cal_v1';
 const DEVICE_CAL_ALL_KEY = '@organize_device_cal_all_v1';
 const GUIDED_ON_KEY = '@organize_journal_guided_v1';
 const GUIDED_SECTIONS_KEY = '@organize_journal_sections_v1';
-const RUNDOWN_LIFE_KEY = '@organize_rundowns_life_v1';
-const RUNDOWN_WORK_KEY = '@organize_rundowns_work_v1';
+const RUNDOWN_KEY = '@organize_rundowns_v2'; // shared across Life + Work
 const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
@@ -151,8 +150,9 @@ export default function App() {
   const [notifyOn, setNotifyOn] = useState(false);
   const [guidedOn, setGuidedOn] = useState(false);
   const [guidedSections, setGuidedSections] = useState(DEFAULT_GUIDED_SECTIONS);
-  // Morning rundown / evening recap, one record per day, per side.
-  const [rundowns, setRundowns] = useState({ life: {}, work: {} });
+  // Morning rundown / evening recap — one record per day, shared across
+  // both sides (the rundown looks at your whole day, Life + Work).
+  const [rundowns, setRundowns] = useState({});
   const [launchFlow, setLaunchFlow] = useState(null); // 'morning' | 'evening' from a tapped notification
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
@@ -175,7 +175,7 @@ export default function App() {
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
           WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
           DEVICE_CAL_ALL_KEY, GUIDED_ON_KEY, GUIDED_SECTIONS_KEY,
-          RUNDOWN_LIFE_KEY, RUNDOWN_WORK_KEY,
+          RUNDOWN_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -206,7 +206,7 @@ export default function App() {
         if (Array.isArray(savedSections) && savedSections.length) {
           setGuidedSections(savedSections);
         }
-        setRundowns({ life: val(21) || {}, work: val(22) || {} });
+        setRundowns(val(21) || {});
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -248,7 +248,7 @@ export default function App() {
   }, [steps, loaded]);
   useEffect(() => {
     if (!loaded) return;
-    save(RUNDOWN_LIFE_KEY, rundowns.life); save(RUNDOWN_WORK_KEY, rundowns.work);
+    save(RUNDOWN_KEY, rundowns);
   }, [rundowns, loaded]);
 
   // ================= Phone calendar & morning digests =================
@@ -393,6 +393,25 @@ export default function App() {
     setHabits(onSide((list) => list.filter((h) => h.id !== id)));
   }
 
+  // Tick a habit wherever it lives (Life or Work) — the rundown spans
+  // both sides, so it can't assume the current one.
+  function toggleHabitById(id) {
+    const today = todayKey();
+    const flip = (list) => list.map((h) => {
+      if (h.id !== id) return h;
+      const days = new Set(h.history || []);
+      if (days.has(today)) days.delete(today);
+      else days.add(today);
+      const history = [...days].sort();
+      return {
+        ...h, history,
+        streak: habitStreak(days, h.target || 7),
+        lastDone: history[history.length - 1] || null,
+      };
+    });
+    setHabits((prev) => ({ life: flip(prev.life), work: flip(prev.work) }));
+  }
+
   // ================= To-do actions =================
 
   // options = { title, deadline, repeat }
@@ -452,6 +471,24 @@ export default function App() {
     setTodos(onSide((list) => list.filter((t) => t.id !== id)));
   }
 
+  // Tick a to-do wherever it lives — for the cross-side rundown.
+  function toggleTodoById(id) {
+    const today = todayKey();
+    const flip = (list) => list.map((t) => {
+      if (t.id !== id) return t;
+      if (t.repeat) {
+        const rolling = t.repeat.type === 'rolling';
+        return t.completedOn === today
+          ? { ...t, completedOn: null, nextDue: rolling ? today : nextOccurrence(t.repeat, today) }
+          : { ...t, completedOn: today, nextDue: rolling ? addDays(today, t.repeat.every) : nextOccurrence(t.repeat, addDays(today, 1)) };
+      }
+      return t.done
+        ? { ...t, done: false, completedOn: null }
+        : { ...t, done: true, completedOn: today };
+    });
+    setTodos((prev) => ({ life: flip(prev.life), work: flip(prev.work) }));
+  }
+
   // ================= Event & reminder actions =================
   //  Entries are born on the current side (`owner: mode`). `shared`
   //  (default true) also shows them in the other side's calendar.
@@ -499,16 +536,16 @@ export default function App() {
   // ================= Morning rundown / evening recap =================
 
   function saveMorningRundown(key, { intention, focusIds }) {
-    setRundowns(onSide((map) => ({
+    setRundowns((map) => ({
       ...map,
       [key]: { ...(map[key] || {}), intention: intention || '', focusIds: focusIds || [], morningDone: true },
-    })));
+    }));
   }
   function saveEveningRundown(key, { achieved, reflection }) {
-    setRundowns(onSide((map) => ({
+    setRundowns((map) => ({
       ...map,
       [key]: { ...(map[key] || {}), achieved: achieved || null, reflection: reflection || '', eveningDone: true },
-    })));
+    }));
   }
 
   // Guided-journal preferences (shared across Life and Work).
@@ -619,7 +656,7 @@ export default function App() {
     setMode('life');
     setDeviceCalOn(false); setDeviceCalAll(false); setDeviceEvents([]); setNotifyOn(false);
     setGuidedOn(false); setGuidedSections(DEFAULT_GUIDED_SECTIONS);
-    setRundowns({ life: {}, work: {} }); setLaunchFlow(null);
+    setRundowns({}); setLaunchFlow(null);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -717,18 +754,29 @@ export default function App() {
                   reminders={reminders}
                   journal={journal[mode]}
                   toggleTodo={toggleTodo}
-                  toggleHabit={toggleHabit}
                   onSeedJournal={setJournalSeed}
                   onUpdateName={updateName}
                   onResetAll={resetAllData}
                   onSwitchMode={switchMode}
                   notifyOn={notifyOn}
                   onToggleNotify={toggleNotify}
-                  rundown={rundowns[mode]}
+                  rundown={rundowns}
                   onSaveMorning={saveMorningRundown}
                   onSaveEvening={saveEveningRundown}
                   launchFlow={launchFlow}
                   onFlowConsumed={() => setLaunchFlow(null)}
+                  allHabits={[
+                    ...habits.life.map((h) => ({ ...h, side: 'life' })),
+                    ...habits.work.map((h) => ({ ...h, side: 'work' })),
+                  ]}
+                  allTodos={[
+                    ...todos.life.map((t) => ({ ...t, side: 'life' })),
+                    ...todos.work.map((t) => ({ ...t, side: 'work' })),
+                  ]}
+                  allEvents={events}
+                  allReminders={reminders}
+                  toggleHabitById={toggleHabitById}
+                  toggleTodoById={toggleTodoById}
                 />
               )}
             </Tab.Screen>
