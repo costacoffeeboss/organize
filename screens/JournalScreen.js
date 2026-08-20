@@ -195,12 +195,13 @@ export default function JournalScreen({
   const recapCanSave =
     !!recapIntention.trim() || !!recapReflection.trim() || !!recapAchieved;
 
-  // Home's companion card can send us here with its question in hand —
-  // open today's page with that question as the prompt.
+  // Home's companion card sends us here to write — open today's entry
+  // exactly like the + button does (the guided flow, moods first),
+  // rather than a seeded plain page.
   useEffect(() => {
     if (journalSeed) {
       setPart('journal');
-      openDay(today, journalSeed);
+      openDay(today);
       onSeedConsumed();
     }
   }, [journalSeed]);
