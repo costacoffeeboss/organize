@@ -156,5 +156,63 @@ export function getNotices({ habits, todos, journal, today = todayKey() }) {
     }
   }
 
+  // ---- Activity ↔ mood correlations ----
+  // Honest, on-device pattern-spotting: for each activity, is a mood
+  // over-represented on the same day, or the day after, versus its
+  // baseline rate? Needs a real sample before it says anything.
+  const moodsOfDay = (k) => {
+    const e = journal[k];
+    return e ? (e.moods || (e.mood ? [e.mood] : [])) : [];
+  };
+  const actsOfDay = (k) => (journal[k] && journal[k].activities) || [];
+  if (journalDays.length >= 8) {
+    const total = journalDays.length;
+    const moodDays = {}; // mood -> # days it appears
+    journalDays.forEach((k) =>
+      new Set(moodsOfDay(k)).forEach((m) => { moodDays[m] = (moodDays[m] || 0) + 1; }));
+    const actDays = {}; // activity -> [days]
+    journalDays.forEach((k) =>
+      actsOfDay(k).forEach((a) => { (actDays[a] = actDays[a] || []).push(k); }));
+
+    const strong = (count, condFrac, baseFrac) =>
+      count >= 3 && condFrac >= 0.5 && baseFrac > 0 && condFrac >= 1.6 * baseFrac;
+
+    const found = [];
+    Object.entries(actDays).forEach(([act, ds]) => {
+      if (ds.length < 4) return;
+      // same day
+      const same = {};
+      ds.forEach((k) => new Set(moodsOfDay(k)).forEach((m) => { same[m] = (same[m] || 0) + 1; }));
+      Object.entries(same).forEach(([m, c]) => {
+        if (strong(c, c / ds.length, (moodDays[m] || 0) / total)) {
+          found.push({ act, mood: m, lag: 'same', lift: (c / ds.length) / ((moodDays[m] || 0) / total) });
+        }
+      });
+      // the day after
+      const next = {}; let pairs = 0;
+      ds.forEach((k) => {
+        const nk = addDays(k, 1);
+        if (journal[nk]) { pairs += 1; new Set(moodsOfDay(nk)).forEach((m) => { next[m] = (next[m] || 0) + 1; }); }
+      });
+      if (pairs >= 4) {
+        Object.entries(next).forEach(([m, c]) => {
+          if (strong(c, c / pairs, (moodDays[m] || 0) / total)) {
+            found.push({ act, mood: m, lag: 'next', lift: (c / pairs) / ((moodDays[m] || 0) / total) });
+          }
+        });
+      }
+    });
+    if (found.length) {
+      found.sort((a, b) => b.lift - a.lift);
+      const f = found[0];
+      const actL = f.act.toLowerCase();
+      add(5.5, 'activity_corr', `${f.act}:${f.mood}:${f.lag}`,
+        f.lag === 'next'
+          ? `You tend to feel ${f.mood} the day after ${actL}.`
+          : `On days with ${actL}, you often feel ${f.mood}.`,
+        'Does that ring true — worth leaning into, or easing off?');
+    }
+  }
+
   return notices.sort((a, b) => a.priority - b.priority);
 }

@@ -47,6 +47,24 @@ const moodById = (id) => MOODS.find((m) => m.id === id);
 const moodIdsOf = (entry) =>
   (entry && (entry.moods || (entry.mood ? [entry.mood] : []))) || [];
 
+// Activities you can tag a day with. Presets to start; the user's own
+// additions join them and stick around (see activityCatalog). Stored on
+// entries as their label, so correlations read cleanly.
+export const PRESET_ACTIVITIES = [
+  { label: 'Work', emoji: '💼' },
+  { label: 'Exercise', emoji: '🏃' },
+  { label: 'Coffee', emoji: '☕' },
+  { label: 'Drinking', emoji: '🍷' },
+  { label: 'Early start', emoji: '🌅' },
+  { label: 'Late night', emoji: '🌙' },
+  { label: 'Socialising', emoji: '👥' },
+  { label: 'Outdoors', emoji: '🌳' },
+  { label: 'Reading', emoji: '📖' },
+  { label: 'Rest', emoji: '🛋️' },
+];
+const presetEmoji = (label) =>
+  (PRESET_ACTIVITIES.find((a) => a.label.toLowerCase() === label.toLowerCase()) || {}).emoji || '📌';
+
 // A gentle nudge for the blank page (rotates by day of month).
 const PROMPTS = [
   'What gave you energy today?',
@@ -81,6 +99,7 @@ export default function JournalScreen({
   journalSeed, onSeedConsumed,
   guidedOn, onToggleGuided, guidedSections, onSetGuidedSections,
   rundown, onSaveRecap,
+  activityCatalog, onAddActivity,
 }) {
   const { COLORS, styles } = useThemedStyles(makeStyles);
   const today = todayKey();
@@ -88,6 +107,8 @@ export default function JournalScreen({
   const [editingKey, setEditingKey] = useState(null); // day being written/read
   const [draft, setDraft] = useState('');
   const [draftMoods, setDraftMoods] = useState([]); // multi-select
+  const [draftActivities, setDraftActivities] = useState([]); // today's activities
+  const [activityInput, setActivityInput] = useState('');
   const [seedPrompt, setSeedPrompt] = useState(null); // companion question → composer
 
   // The guided flow: moods → (mood reflections) → one page per section
@@ -210,6 +231,8 @@ export default function JournalScreen({
     if (key > today) return; // can't journal the future
     const existing = journal[key];
     setDraftMoods(moodIdsOf(existing));
+    setDraftActivities((existing && existing.activities) || []);
+    setActivityInput('');
     setSeedPrompt(seed);
     setBlocks([]);
     setStepText('');
@@ -217,7 +240,7 @@ export default function JournalScreen({
     if (!existing && guidedOn && !seed) {
       // Fresh guided entry → the step-by-step flow.
       const sectionSteps = guidedSections.slice(0, -1).map((s) => ({ kind: 'section', section: s }));
-      setFlowSteps([{ kind: 'moods' }, ...sectionSteps, { kind: 'page' }]);
+      setFlowSteps([{ kind: 'moods' }, { kind: 'activities' }, ...sectionSteps, { kind: 'page' }]);
       setStepIdx(0);
       setDraft('');
     } else {
@@ -257,7 +280,9 @@ export default function JournalScreen({
   function onSave() {
     const text = draft.trim();
     if (text) {
-      saveEntry(editingKey, { text, mood: draftMoods[0] || null, moods: draftMoods });
+      saveEntry(editingKey, {
+        text, mood: draftMoods[0] || null, moods: draftMoods, activities: draftActivities,
+      });
     }
     setEditingKey(null);
   }
@@ -266,6 +291,30 @@ export default function JournalScreen({
     setDraftMoods((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
     );
+  }
+
+  // --- Activities ---
+  // Presets plus the user's own additions, deduped by label.
+  const allActivities = [
+    ...PRESET_ACTIVITIES,
+    ...(activityCatalog || [])
+      .filter((l) => !PRESET_ACTIVITIES.some((p) => p.label.toLowerCase() === l.toLowerCase()))
+      .map((l) => ({ label: l, emoji: '📌' })),
+  ];
+  function toggleActivity(label) {
+    setDraftActivities((prev) =>
+      prev.includes(label) ? prev.filter((a) => a !== label) : [...prev, label]
+    );
+  }
+  function addActivityFromInput() {
+    const name = activityInput.trim();
+    if (!name) return;
+    // Reuse an existing label (any case); otherwise add it to the vocabulary.
+    const existing = allActivities.find((a) => a.label.toLowerCase() === name.toLowerCase());
+    const label = existing ? existing.label : name;
+    if (!existing) onAddActivity(label);
+    setDraftActivities((prev) => (prev.includes(label) ? prev : [...prev, label]));
+    setActivityInput('');
   }
 
   // --- Guided-format editing (the settings cog) ---
@@ -528,6 +577,43 @@ export default function JournalScreen({
                   </View>
                 )}
 
+                {currentStep.kind === 'activities' && (
+                  <View>
+                    <Text style={styles.stepTitle}>What did you do today?</Text>
+                    <Text style={styles.stepSub}>
+                      Tag the day so Organize can spot what lifts or drains you over time.
+                    </Text>
+                    <View style={styles.moodsGrid}>
+                      {allActivities.map((a) => (
+                        <TouchableOpacity
+                          key={a.label}
+                          style={[styles.moodChip, draftActivities.includes(a.label) && styles.moodChipOn]}
+                          onPress={() => toggleActivity(a.label)}
+                        >
+                          <Text style={styles.moodEmoji}>{a.emoji}</Text>
+                          <Text style={[styles.moodLabel, draftActivities.includes(a.label) && styles.moodLabelOn]}>
+                            {a.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <View style={styles.addRow}>
+                      <TextInput
+                        style={styles.addInput}
+                        placeholder="Add an activity…"
+                        placeholderTextColor={COLORS.muted2}
+                        value={activityInput}
+                        onChangeText={setActivityInput}
+                        onSubmitEditing={addActivityFromInput}
+                        returnKeyType="done"
+                      />
+                      <TouchableOpacity style={styles.addBtn} onPress={addActivityFromInput}>
+                        <Text style={styles.addBtnText}>Add</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
                 {currentStep.kind === 'reflect' && (
                   <View>
                     <Text style={styles.stepBadge}>
@@ -570,7 +656,7 @@ export default function JournalScreen({
 
                 <TouchableOpacity style={styles.stepBtn} onPress={stepNext} activeOpacity={0.85}>
                   <Text style={styles.stepBtnText}>
-                    {currentStep.kind === 'moods' || stepText.trim() ? 'Next' : 'Skip'}
+                    {currentStep.kind === 'moods' || currentStep.kind === 'activities' || stepText.trim() ? 'Next' : 'Skip'}
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -596,6 +682,38 @@ export default function JournalScreen({
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </ScrollView>
+
+                {/* Activity chips — same idea, plus a quick add */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.moodScroller}
+                  contentContainerStyle={styles.moodRow}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {allActivities.map((a) => (
+                    <TouchableOpacity
+                      key={a.label}
+                      style={[styles.moodChip, draftActivities.includes(a.label) && styles.moodChipOn]}
+                      onPress={() => toggleActivity(a.label)}
+                    >
+                      <Text style={styles.moodEmoji}>{a.emoji}</Text>
+                      <Text style={[styles.moodLabel, draftActivities.includes(a.label) && styles.moodLabelOn]}>
+                        {a.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TextInput
+                    style={styles.activityAdd}
+                    placeholder="+ activity"
+                    placeholderTextColor={COLORS.muted2}
+                    value={activityInput}
+                    onChangeText={setActivityInput}
+                    onSubmitEditing={addActivityFromInput}
+                    returnKeyType="done"
+                    blurOnSubmit={false}
+                  />
                 </ScrollView>
 
                 {/* One open sheet — with guided headings styled in place.
@@ -807,6 +925,11 @@ const makeStyles = (COLORS) => StyleSheet.create({
 
   moodScroller: { flexGrow: 0, marginTop: 12, marginBottom: 4 },
   moodRow: { flexDirection: 'row', gap: 7, paddingHorizontal: 20, alignItems: 'center' },
+  activityAdd: {
+    minWidth: 96, borderWidth: 1, borderColor: COLORS.lineStrong, borderStyle: 'dashed',
+    borderRadius: 12, paddingVertical: 7, paddingHorizontal: 12,
+    color: COLORS.ink, fontSize: 12.5, backgroundColor: COLORS.panel,
+  },
 
   // --- the guided flow's step screens ---
   stepWrap: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 30 },

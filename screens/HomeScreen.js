@@ -41,7 +41,7 @@ const DISMISSED_KEY = '@organize_dismissed_notices';
 const NOTICE_LOG_KEY = '@organize_notice_log';
 // Notices that, however true, wear thin if repeated daily — surfaced at
 // most once every N days. (Kind → cooldown in days.)
-const WEEKLY_NOTICES = { mood_dip: 7 };
+const WEEKLY_NOTICES = { mood_dip: 7, activity_corr: 7 };
 
 const PROMPTS = [
   'What gave you energy today?',

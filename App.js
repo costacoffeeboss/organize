@@ -64,6 +64,7 @@ const DEVICE_CAL_ALL_KEY = '@organize_device_cal_all_v1';
 const GUIDED_ON_KEY = '@organize_journal_guided_v1';
 const GUIDED_SECTIONS_KEY = '@organize_journal_sections_v1';
 const RUNDOWN_KEY = '@organize_rundowns_v2'; // shared across Life + Work
+const ACTIVITIES_KEY = '@organize_activities_v1'; // custom activity vocabulary, shared
 const NOTIFY_KEY = '@organize_notify_v1';
 const WORK_HABITS_KEY = '@organize_work_habits_v1';
 const WORK_TODOS_KEY = '@organize_work_todos_v1';
@@ -174,6 +175,9 @@ export default function App() {
   // Morning rundown / evening recap — one record per day, shared across
   // both sides (the rundown looks at your whole day, Life + Work).
   const [rundowns, setRundowns] = useState({});
+  // Custom activities the user has added — a shared, growing vocabulary
+  // logged against journal entries (presets live in JournalScreen).
+  const [activityCatalog, setActivityCatalog] = useState([]);
   const [launchFlow, setLaunchFlow] = useState(null); // 'morning' | 'evening' from a tapped notification
   const [welcomed, setWelcomed] = useState(false);
   const [name, setName] = useState('');
@@ -196,7 +200,7 @@ export default function App() {
           MODE_KEY, WORK_HABITS_KEY, WORK_TODOS_KEY, WORK_JOURNAL_KEY,
           WORK_GOALS_KEY, WORK_STEPS_KEY, DEVICE_CAL_KEY, NOTIFY_KEY,
           DEVICE_CAL_ALL_KEY, GUIDED_ON_KEY, GUIDED_SECTIONS_KEY,
-          RUNDOWN_KEY,
+          RUNDOWN_KEY, ACTIVITIES_KEY,
         ]);
         const val = (i) => (pairs[i][1] ? JSON.parse(pairs[i][1]) : null);
 
@@ -231,6 +235,7 @@ export default function App() {
           setGuidedSections(savedSections);
         }
         setRundowns(val(21) || {});
+        setActivityCatalog(val(22) || []);
       } catch (e) {
         console.log('Could not load data:', e);
       } finally {
@@ -274,6 +279,10 @@ export default function App() {
     if (!loaded) return;
     save(RUNDOWN_KEY, rundowns);
   }, [rundowns, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    save(ACTIVITIES_KEY, activityCatalog);
+  }, [activityCatalog, loaded]);
 
   // ================= Phone calendar & morning digests =================
 
@@ -550,11 +559,21 @@ export default function App() {
 
   // `moods` is the multi-select list; `mood` stays as its first item
   // so anything reading the old single-mood shape keeps working.
-  function saveEntry(key, { text, mood, moods }) {
+  // `activities` are the day's tagged activities (labels).
+  function saveEntry(key, { text, mood, moods, activities }) {
     setJournal(onSide((entries) => ({
       ...entries,
-      [key]: { text, mood: mood || null, moods: moods || null },
+      [key]: { text, mood: mood || null, moods: moods || null, activities: activities || null },
     })));
+  }
+
+  // Add a custom activity to the shared vocabulary (deduped, case-insensitive).
+  function addActivity(label) {
+    const name = (label || '').trim();
+    if (!name) return;
+    setActivityCatalog((list) =>
+      list.some((a) => a.toLowerCase() === name.toLowerCase()) ? list : [...list, name]
+    );
   }
 
   // ================= Morning rundown / evening recap =================
@@ -684,7 +703,7 @@ export default function App() {
     setMode('life');
     setDeviceCalOn(false); setDeviceCalAll(false); setDeviceEvents([]); setNotifyOn(false);
     setGuidedOn(false); setGuidedSections(DEFAULT_GUIDED_SECTIONS);
-    setRundowns({}); setLaunchFlow(null);
+    setRundowns({}); setLaunchFlow(null); setActivityCatalog([]);
     setWelcomed(false); // straight back to the welcome flow
   }
 
@@ -879,6 +898,8 @@ export default function App() {
                   onSetGuidedSections={updateGuidedSections}
                   rundown={rundowns}
                   onSaveRecap={updateRecap}
+                  activityCatalog={activityCatalog}
+                  onAddActivity={addActivity}
                 />
               )}
             </Tab.Screen>
