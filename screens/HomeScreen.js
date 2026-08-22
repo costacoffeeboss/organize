@@ -26,7 +26,7 @@ import { useThemedStyles, paletteFor, SERIF } from '../theme';
 import { DEVICE_GREY } from '../utils/deviceCalendar';
 import {
   todayKey, niceDate, greetingLabel, repeatOccursOn, reminderOccursOn,
-  eventOccursOn, currentStreak,
+  eventOccursOn, currentStreak, diffDays,
 } from '../utils/dates';
 import { getNotices } from '../utils/noticer';
 import ScreenHeader from '../components/ScreenHeader';
@@ -38,6 +38,10 @@ import FullPage from '../components/FullPage';
 import Rise from '../components/Rise';
 
 const DISMISSED_KEY = '@organize_dismissed_notices';
+const NOTICE_LOG_KEY = '@organize_notice_log';
+// Notices that, however true, wear thin if repeated daily — surfaced at
+// most once every N days. (Kind → cooldown in days.)
+const WEEKLY_NOTICES = { mood_dip: 7 };
 
 const PROMPTS = [
   'What gave you energy today?',
@@ -87,6 +91,7 @@ export default function HomeScreen({
   const navigation = useNavigation();
   const today = todayKey();
   const [dismissed, setDismissed] = useState([]);
+  const [noticeLog, setNoticeLog] = useState(null); // { kind: lastShownDay }, null until loaded
   const [showSettings, setShowSettings] = useState(false);
   const [showSwitch, setShowSwitch] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
@@ -135,15 +140,47 @@ export default function HomeScreen({
     );
   }
 
-  // --- Companion (dismissals are remembered per side) ---
+  // --- Companion (dismissals & cooldowns are remembered per side) ---
   const dismissKey = mode === 'work' ? `${DISMISSED_KEY}_work` : DISMISSED_KEY;
+  const noticeLogKey = mode === 'work' ? `${NOTICE_LOG_KEY}_work` : NOTICE_LOG_KEY;
   useEffect(() => {
     AsyncStorage.getItem(dismissKey)
       .then((v) => { setDismissed(v ? JSON.parse(v) : []); })
       .catch(() => {});
   }, [dismissKey]);
-  const notices = getNotices({ habits, todos, journal, today });
+  useEffect(() => {
+    AsyncStorage.getItem(noticeLogKey)
+      .then((v) => { setNoticeLog(v ? JSON.parse(v) : {}); })
+      .catch(() => { setNoticeLog({}); });
+  }, [noticeLogKey]);
+
+  // Some true observations still nag if repeated every day. A notice
+  // under cooldown is hidden until N days after it was last surfaced
+  // (shown again on that same day is fine, so it doesn't flicker away).
+  const log = noticeLog || {};
+  const cooledOut = (kind) => {
+    const days = WEEKLY_NOTICES[kind];
+    if (!days) return false;
+    const last = log[kind];
+    return !!last && last !== today && diffDays(last, today) < days;
+  };
+  const notices = getNotices({ habits, todos, journal, today })
+    .filter((n) => !cooledOut(n.kind));
   const notice = notices.find((n) => !dismissed.includes(n.id));
+
+  // Record a rate-limited notice the moment it's surfaced (top of the
+  // list), so dismissing it doesn't win a fresh showing tomorrow.
+  const surfaced = notices[0];
+  useEffect(() => {
+    if (noticeLog === null) return; // wait for the log to load
+    const kind = surfaced && surfaced.kind;
+    if (kind && WEEKLY_NOTICES[kind] && noticeLog[kind] !== today) {
+      const next = { ...noticeLog, [kind]: today };
+      setNoticeLog(next);
+      AsyncStorage.setItem(noticeLogKey, JSON.stringify(next)).catch(() => {});
+    }
+  }, [surfaced && surfaced.kind, noticeLog, noticeLogKey]);
+
   function dismissNotice(n) {
     const next = [...dismissed, n.id].filter((id) => id.endsWith(today));
     setDismissed(next);
