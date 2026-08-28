@@ -164,7 +164,9 @@ export default function JournalScreen({
       steps.splice(stepIdx + 1, 0, ...reflects);
       setFlowSteps(steps);
     } else if (stepText.trim()) {
-      const title = cur.kind === 'reflect' ? reflectHeading(cur.mood) : cur.section.title;
+      const title = cur.kind === 'reflect' ? reflectHeading(cur.mood)
+        : cur.kind === 'prompt' ? cur.title
+        : cur.section.title;
       newBlocks = [...blocks, { title, text: stepText.trim() }];
       setBlocks(newBlocks);
     }
@@ -216,13 +218,13 @@ export default function JournalScreen({
   const recapCanSave =
     !!recapIntention.trim() || !!recapReflection.trim() || !!recapAchieved;
 
-  // Home's companion card sends us here to write — open today's entry
-  // exactly like the + button does (the guided flow, moods first),
-  // rather than a seeded plain page.
+  // Home's companion card sends us here to write, carrying its question.
+  // We open today's entry through the normal guided flow (moods first),
+  // and the question becomes its own slide (see openDay).
   useEffect(() => {
     if (journalSeed) {
       setPart('journal');
-      openDay(today);
+      openDay(today, journalSeed);
       onSeedConsumed();
     }
   }, [journalSeed]);
@@ -237,14 +239,20 @@ export default function JournalScreen({
     setBlocks([]);
     setStepText('');
     setPageBaseline('');
-    if (!existing && guidedOn && !seed) {
-      // Fresh guided entry → the step-by-step flow.
+    if (!existing && guidedOn) {
+      // Fresh guided entry → the step-by-step flow. When Organize sent a
+      // question along (seed), it becomes its own slide right after moods
+      // and activities — an invitation to answer what it noticed.
       const sectionSteps = guidedSections.slice(0, -1).map((s) => ({ kind: 'section', section: s }));
-      setFlowSteps([{ kind: 'moods' }, { kind: 'activities' }, ...sectionSteps, { kind: 'page' }]);
+      const promptStep = seed ? [{ kind: 'prompt', title: seed }] : [];
+      setFlowSteps([
+        { kind: 'moods' }, { kind: 'activities' }, ...promptStep, ...sectionSteps, { kind: 'page' },
+      ]);
       setStepIdx(0);
       setDraft('');
     } else {
-      // Existing entries (and companion questions) open as one page.
+      // Guided off, or an existing entry → one open page (the question,
+      // if any, sits in as the prompt).
       setFlowSteps(null);
       setDraft(existing ? existing.text : '');
     }
@@ -611,6 +619,23 @@ export default function JournalScreen({
                         <Text style={styles.addBtnText}>Add</Text>
                       </TouchableOpacity>
                     </View>
+                  </View>
+                )}
+
+                {currentStep.kind === 'prompt' && (
+                  <View>
+                    <Text style={styles.stepBadge}>✦ Organize noticed</Text>
+                    <Text style={styles.stepTitle}>{currentStep.title}</Text>
+                    <TextInput
+                      style={styles.stepInput}
+                      placeholder="Write a few honest lines — or skip."
+                      placeholderTextColor={COLORS.muted2}
+                      value={stepText}
+                      onChangeText={setStepText}
+                      multiline
+                      textAlignVertical="top"
+                      autoFocus
+                    />
                   </View>
                 )}
 
