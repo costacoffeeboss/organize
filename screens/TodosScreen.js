@@ -6,7 +6,7 @@
 //    To-do    — the open list: anytime tasks + repeatable tasks that
 //               are currently due. Ticking a repeatable puts it away
 //               until it comes around again. (Expandable)
-//    Upcoming — the next three dated things, collapsed by default.
+//    Upcoming — every dated thing still ahead, collapsed by default.
 //
 //  The floating ＋ opens the add pop-up: title, repeat (daily · weekly
 //  on chosen weekdays · once a week on any day · every 2/4 weeks ·
@@ -179,7 +179,6 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
   upcomingAll.sort((a, b) =>
     (a.deadline || a.nextDue) < (b.deadline || b.nextDue) ? -1 : 1
   );
-  const upcoming = upcomingAll.slice(0, 3); // just the next three
 
   // --- The small right-hand label on each row ---
   function metaFor(t, group) {
@@ -279,7 +278,7 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
           </View>
         )}
 
-        {/* --- Upcoming (expandable, next three) --- */}
+        {/* --- Upcoming (expandable — shows them all) --- */}
         {!empty && (
           <View>
             <GroupHead
@@ -289,8 +288,8 @@ export default function TodosScreen({ todos, addTodo, updateTodo, toggleTodo, de
               onPress={() => setUpcomingOpen(!upcomingOpen)}
             />
             {upcomingOpen && (
-              upcoming.length > 0
-                ? renderRows(upcoming, 'upcoming')
+              upcomingAll.length > 0
+                ? renderRows(upcomingAll, 'upcoming')
                 : <Text style={styles.quiet}>Nothing on the horizon.</Text>
             )}
           </View>
