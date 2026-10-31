@@ -1,6 +1,6 @@
 // =====================================================================
 //  Daily rundown reminders — two local notifications a day, fired by
-//  iOS itself (no server): 7am to start the morning rundown, 7pm for
+//  iOS itself (no server): 8am to start the morning rundown, 7pm for
 //  the evening recap. Each carries a `flow` payload so tapping it can
 //  open straight into that flow. Repeating daily triggers, so there's
 //  nothing to top up and we stay far under iOS's pending-notification
@@ -9,7 +9,7 @@
 
 import * as Notifications from 'expo-notifications';
 
-export const MORNING_HOUR = 7;
+export const MORNING_HOUR = 8;
 export const EVENING_HOUR = 19;
 
 // Show reminders even if the app happens to be open at the time.
@@ -42,7 +42,7 @@ export async function rescheduleReminders(enabled) {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: 'Good morning ☀️',
-        body: 'Take a minute to plan your day.',
+        body: 'Tap to start your morning rundown.',
         data: { flow: 'morning' },
       },
       trigger: {
@@ -53,7 +53,7 @@ export async function rescheduleReminders(enabled) {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: 'Evening recap 🌙',
-        body: 'How did today go? Tick off what you did.',
+        body: 'Tap to recap your day.',
         data: { flow: 'evening' },
       },
       trigger: {

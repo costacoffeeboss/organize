@@ -296,7 +296,7 @@ export default function HomeScreen({
     setFlow(null);
   }
 
-  // A tapped 7am/7pm notification opens straight into its flow.
+  // A tapped 8am/7pm notification opens straight into its flow.
   useEffect(() => {
     if (launchFlow === 'morning') { openMorning(); onFlowConsumed(); }
     else if (launchFlow === 'evening') { openEvening(); onFlowConsumed(); }

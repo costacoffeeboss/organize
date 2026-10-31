@@ -303,7 +303,7 @@ export default function App() {
     AsyncStorage.setItem(DEVICE_CAL_ALL_KEY, next ? '1' : '0').catch(() => {});
   }
 
-  // Keep the 7am/7pm rundown reminders in sync with the toggle.
+  // Keep the 8am/7pm rundown reminders in sync with the toggle.
   useEffect(() => {
     if (!loaded) return;
     rescheduleReminders(notifyOn);
