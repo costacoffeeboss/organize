@@ -1,0 +1,32 @@
+name: Promote OTA to production
+
+# The "ship it to everyone" button. Run this manually once you've tested a
+# change on the preview build on your phone. It publishes the current
+# master over the air to the "production" channel, so everyone with the
+# App Store app gets it next time they open it. No rebuild, no review
+# (JS/content changes only — native changes still need a new build).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      - name: Publish update to production
+        run: |
+          eas update --channel production --message "Promote: $(git log -1 --pretty=%s)" --non-interactive

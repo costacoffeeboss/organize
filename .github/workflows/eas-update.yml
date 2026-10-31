@@ -1,7 +1,9 @@
 name: OTA update (EAS Update)
 
-# Every push to master publishes the JS over the air. Installed builds on
-# the "production" channel pick it up next time the app is opened.
+# Every push to master publishes the JS over the air to the "preview"
+# channel — your own test build on your phone, NOT the public. Try the
+# change there first, then run the "Promote OTA to production" workflow
+# to release it to everyone on the App Store.
 
 on:
   push:
@@ -30,5 +32,5 @@ jobs:
 
       - run: npm ci
 
-      - name: Publish update
-        run: eas update --channel production --message "$(git log -1 --pretty=%s)" --non-interactive
+      - name: Publish update to preview
+        run: eas update --channel preview --message "$(git log -1 --pretty=%s)" --non-interactive

@@ -10,6 +10,13 @@ name: Build iOS (TestFlight)
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: "EAS build profile"
+        type: choice
+        options:
+          - production
+          - preview
+        default: production
       submit:
         description: "Auto-submit to TestFlight when the build finishes"
         type: boolean
@@ -36,7 +43,7 @@ jobs:
       - name: Start EAS build
         run: |
           if [ "${{ inputs.submit }}" = "true" ]; then
-            eas build --platform ios --profile production --non-interactive --no-wait --auto-submit
+            eas build --platform ios --profile ${{ inputs.profile }} --non-interactive --no-wait --auto-submit
           else
-            eas build --platform ios --profile production --non-interactive --no-wait
+            eas build --platform ios --profile ${{ inputs.profile }} --non-interactive --no-wait
           fi

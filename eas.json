@@ -9,12 +9,21 @@
       "distribution": "internal",
       "channel": "development"
     },
+    "preview": {
+      "autoIncrement": true,
+      "channel": "preview"
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production"
     }
   },
   "submit": {
+    "preview": {
+      "ios": {
+        "ascAppId": "6789677306"
+      }
+    },
     "production": {
       "ios": {
         "ascAppId": "6789677306"
