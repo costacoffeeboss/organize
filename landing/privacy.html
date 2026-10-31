@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#ecdfc8" />
+<meta name="description" content="Organize privacy policy — everything stays on your device. No accounts, no tracking, no data collection." />
+<title>Organize — Privacy Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500;1,9..144,600&family=Hanken+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#ecdfc8;
+    --panel:#f8f1e1;
+    --line:rgba(59,44,30,.13);
+    --line-strong:rgba(59,44,30,.22);
+    --ink:#2a2118;
+    --muted:#6f6152;
+    --espresso:#4b3626;
+    --espresso-2:#5f4632;
+    --radius:14px;
+    --maxw:720px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Hanken Grotesk',sans-serif;
+    font-size:17px;
+    line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+    position:relative;
+    padding:0 24px 96px;
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.045;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  a{color:var(--espresso-2);text-decoration:none;border-bottom:1px solid var(--line-strong)}
+  a:hover{color:var(--ink)}
+  ::selection{background:var(--espresso);color:var(--bg)}
+  .wrap{max-width:var(--maxw);margin:0 auto}
+
+  .top{padding:46px 0 14px;display:flex;align-items:center;gap:12px}
+  .mark{display:inline-grid;grid-template-columns:repeat(2,13px);grid-template-rows:repeat(2,13px);gap:4px}
+  .mark span{border-radius:3px;border:1.5px solid var(--espresso);background:transparent}
+  .mark span:first-child{background:var(--espresso);border-color:var(--espresso)}
+  .brand{font-family:'Fraunces',serif;font-weight:600;font-size:22px;letter-spacing:-.01em}
+
+  .eyebrow{
+    font-family:'Hanken Grotesk',sans-serif;font-weight:600;
+    font-size:12px;letter-spacing:.26em;text-transform:uppercase;
+    color:var(--espresso-2);margin-top:40px;display:block;
+  }
+  h1{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-.015em;line-height:1.08;font-size:40px;margin:10px 0 6px}
+  h2{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-.01em;font-size:23px;margin:40px 0 10px}
+  em.accent{font-style:italic;color:var(--espresso-2)}
+  .updated{color:var(--muted);font-size:14.5px;letter-spacing:.01em}
+  p{margin:0 0 14px}
+  ul{margin:0 0 14px 22px}
+  li{margin:0 0 8px}
+
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px 24px;margin:22px 0 8px;
+  }
+  .card p:last-child{margin-bottom:0}
+  .tldr{font-size:18px}
+
+  footer{margin-top:52px;padding-top:22px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+    <span class="brand">Organize</span>
+  </div>
+
+  <span class="eyebrow">Privacy Policy</span>
+  <h1>Your things stay <em class="accent">your things</em>.</h1>
+  <p class="updated">Last updated 31 October 2026</p>
+
+  <div class="card">
+    <p class="tldr"><strong>The short version:</strong> Organize keeps everything on your iPhone. There are no accounts, no servers storing your notes, no analytics, no tracking, and no ads. Nothing you write is sent anywhere, and nothing is ever sold or shared.</p>
+  </div>
+
+  <h2>What Organize stores, and where</h2>
+  <p>Everything you create in Organize lives in local storage on your own device. That includes your:</p>
+  <ul>
+    <li>habits and their history,</li>
+    <li>to-do lists and their deadlines and repeats,</li>
+    <li>journal entries, moods and the activities you log,</li>
+    <li>goals, calendar events, and your morning and evening rundowns.</li>
+  </ul>
+  <p>None of this is uploaded to us or to anyone else. If you delete the app, this data is removed with it.</p>
+
+  <h2>Your phone's calendar</h2>
+  <p>If you choose to connect your phone's calendar, Organize reads your existing events so it can show them alongside its own, <strong>read-only</strong>. Those events are displayed on your device only — they are never copied off your phone, uploaded, or changed. You can turn this off at any time in your iPhone's Settings, and Organize will simply stop showing them.</p>
+
+  <h2>Notifications</h2>
+  <p>Organize can remind you about your morning rundown, evening recap and calendar events. These reminders are scheduled locally on your device. We do not run a notification server and do not send you push messages from the internet.</p>
+
+  <h2>What Organize does <em class="accent">not</em> do</h2>
+  <ul>
+    <li>No accounts or sign-in — you never give us an email or password.</li>
+    <li>No analytics or usage tracking.</li>
+    <li>No advertising and no ad networks.</li>
+    <li>No third-party services that collect your personal information.</li>
+    <li>No selling, renting or sharing of your data. Ever.</li>
+  </ul>
+
+  <h2>App updates</h2>
+  <p>Organize downloads its own software updates over the internet so you always have the latest version without waiting on the App Store. These updates deliver app code only — they do not send your journal, habits or any personal content anywhere. Like any download, the request involves your device's IP address, which we do not store or use to identify you.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Because everything is stored on your device, you are always in control. You can remove individual items inside the app, or delete the app entirely to erase all of its data from your phone.</p>
+
+  <h2>Children</h2>
+  <p>Organize is a general-audience app and is not directed at children. It does not knowingly collect any information from anyone.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy ever changes, the updated version will be posted on this page with a new date at the top.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about privacy in Organize? Email <a href="mailto:costacoffeeboss@gmail.com">costacoffeeboss@gmail.com</a>.</p>
+
+  <footer>
+    Organize — everything in its place. &nbsp;·&nbsp; <a href="./index.html">Back to home</a>
+  </footer>
+</div>
+</body>
+</html>
