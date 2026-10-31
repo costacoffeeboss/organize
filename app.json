@@ -13,7 +13,7 @@
       "url": "https://u.expo.dev/d47274fa-5fef-47f1-9976-f885ba9f0c10"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.costacoffeeboss.organize",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
