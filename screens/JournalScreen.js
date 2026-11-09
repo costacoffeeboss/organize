@@ -235,7 +235,7 @@ export default function JournalScreen({
     setDraftMoods(moodIdsOf(existing));
     setDraftActivities((existing && existing.activities) || []);
     setActivityInput('');
-    setSeedPrompt(seed);
+    setSeedPrompt(seed ? seed.question : null);
     setBlocks([]);
     setStepText('');
     setPageBaseline('');
@@ -244,7 +244,9 @@ export default function JournalScreen({
       // question along (seed), it becomes its own slide right after moods
       // and activities — an invitation to answer what it noticed.
       const sectionSteps = guidedSections.slice(0, -1).map((s) => ({ kind: 'section', section: s }));
-      const promptStep = seed ? [{ kind: 'prompt', title: seed }] : [];
+      const promptStep = seed
+        ? [{ kind: 'prompt', title: seed.question, observation: seed.observation }]
+        : [];
       setFlowSteps([
         { kind: 'moods' }, { kind: 'activities' }, ...promptStep, ...sectionSteps, { kind: 'page' },
       ]);
@@ -625,7 +627,10 @@ export default function JournalScreen({
                 {currentStep.kind === 'prompt' && (
                   <View>
                     <Text style={styles.stepBadge}>✦ Organize noticed</Text>
-                    <Text style={styles.stepTitle}>{currentStep.title}</Text>
+                    <Text style={styles.stepTitle}>{currentStep.observation || currentStep.title}</Text>
+                    {!!currentStep.observation && (
+                      <Text style={styles.stepSub}>{currentStep.title}</Text>
+                    )}
                     <TextInput
                       style={styles.stepInput}
                       placeholder="Write a few honest lines — or skip."

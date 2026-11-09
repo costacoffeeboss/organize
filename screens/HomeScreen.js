@@ -391,7 +391,7 @@ export default function HomeScreen({
           <CompanionCard
             notice={notice}
             onWrite={() => {
-              onSeedJournal(notice.question);
+              onSeedJournal({ observation: notice.text, question: notice.question });
               navigation.navigate('Journal');
             }}
             onDismiss={() => dismissNotice(notice)}
